@@ -1,0 +1,32 @@
+{
+  "name": "reanalyze",
+  "version": "2.23.0",
+  "private": true,
+  "description": "Analyzers for Dead Code/Types and termination",
+  "license": "MIT",
+  "scripts": {
+    "build": "dune build",
+    "build406": "cp src/dune src/dune.saved && cp src/dune.406 src/dune && npm run build && mv src/dune.saved src/dune || mv src/dune.saved src/dune",
+    "clean": "dune clean -p reanalyze",
+    "test": "node ./scripts/run_integration_tests.js",
+    "install:examples": "(cd examples/deadcode && npm install) & (cd examples/termination && npm install)",
+    "build:examples": "(cd examples/deadcode && npm run clean && npm run build && npm run analyze) & (cd examples/termination && npm run clean && npm run build && npm run analyze)",
+    "dce": "dune build && dune exec reanalyze.exe -- -suppress dead-code-ppx,src/compiler-libs-406 -unsuppress doesnotexist -dce-cmt _build",
+    "exception": "dune build && dune exec reanalyze.exe -- -exclude-paths src/compiler-libs-406/parser.ml -suppress src/ext,src/compiler-libs-406 -exception-cmt _build",
+    "preversion": "npm test",
+    "version": "node scripts/bump_version_module.js && git add -A src/",
+    "postversion": "git push && git push --tags"
+  },
+  "bin": {
+    "reanalyze.exe": "./_build/install/default/bin/reanalyze.exe"
+  },
+  "author": "Cristiano Calcagno",
+  "keywords": [
+    "rescript",
+    "tooling"
+  ],
+  "bugs": {
+    "url": "https://github.com/cristianoc/reanalyze/issues"
+  },
+  "homepage": "https://github.com/cristianoc/reanalyze#readme"
+}
