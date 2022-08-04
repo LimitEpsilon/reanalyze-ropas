@@ -1,54 +1,31 @@
-type patr = CL.Typedtree.pattern
-
+type param = CL.Typedtree.pattern list
 and code_loc = CL.Location.t
+and expr = Expr_var of param | Expr of code_loc
+and tagged_expr = Val of expr | Packet of expr
+and env = Env_var | Env of (param * tagged_expr) list
 
-and expr =
-  | Expr_var of code_loc
-  | Expr of code_loc
-
-and tagged_expr =
-  | Val of expr
-  | Packet of expr
-
-and env =
-  | Env_var of code_loc
-  | Env of (patr list * tagged_expr) list
-
-(* construct : CL.Types.constructor_description.cstr_name *)
+(* construct, record : name |> string_of_longident *)
 (* variant : CL.Asttypes.label *)
 and constr = string
 
-(* CL.Types.label_description.lbl_name *)
-and fld =
-  | Mut of string
-  | Immut of string
-  | Arr of int
-  | Tup of int
+(* construct : need to know arity *)
+and fld = Kappa of constr * int | Lbl of constr
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
-and prim_desc = string
-
-and arg_lbl = CL.Asttypes.arg_label
-
-and param = arg_lbl * patr list
+and opcode = string
 
 (* set expression type *)
 and se =
   | Bot (* empty set *)
   | Top (* _ *)
   | Const of CL.Asttypes.constant
-  | Closure of param * expr list * env (* lambda (p->e)+ *)
-  | Lazy of expr * env (* lazy e *)
-  | Force of se (* %lazy_force *)
-  | Mem of code_loc (* labelled by where the field is first declared *)
-  | Var of tagged_expr * env (* set variable, val version *)
-  | App_V of se * expr (* possible values *)
-  | App_P of se * expr (* possible exn packets *)
-  | Con of constr * se (* construct *)
-  | Decon of constr * se (* deconstruct *)
-  | Fld of se * fld (* field of a record *)
-  | Cnt of se (* contents of a memory location *)
-  | Bop of prim_desc * se * se (* binary operator *)
+  | Closure of param option * expr list * env (* lambda (p->e)+ / lazy *)
+  | Var of tagged_expr * env (* set variable *)
+  | App_V of se * expr option (* possible values *)
+  | App_P of se * expr option (* possible exn packets *)
+  | Con of fld * se list (* construct / record field *)
+  | Fld of se * fld (* field of a record / deconstruct *)
+  | Op of opcode * se list (* primitive operators *)
   | Union of se * se (* union *)
   | Inter of se * se (* intersection *)
   | Comp of se (* complement *)
@@ -58,7 +35,40 @@ and se =
 (* A \supseteq B is translated to (A, B) *)
 and sc = se * se
 
+(* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
+let rec string_of_longident li =
+  match li with
+  | CL.Longident.Lident s -> s
+  | CL.Longident.Ldot(li, s) -> string_of_longident li ^ "." ^ s
+  | CL.Longident.Lapply(l1, l2) -> (* applicative functor : see ocamlc -help | grep app-funct *)
+      string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
+
 let update_sc old_sc new_sc = old_sc := new_sc :: !old_sc
+
+let isRaise : CL.Types.value_description -> bool = function
+  | {
+      val_kind =
+        Val_prim
+          {
+            prim_name =
+              "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
+          };
+    } ->
+    true
+  | _ -> false
+
+let isApply : CL.Types.value_description -> bool = function
+  | {val_kind = Val_prim {prim_name = "%apply"}} -> true
+  | _ -> false
+
+let isRevapply : CL.Types.value_description -> bool = function
+  | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
+  | _ -> false
+
+let print_prim : CL.Types.value_description -> unit = function
+  | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
+    Printf.printf "prim_name: %s, prim_native_name: %S\n" s1 s2
+  | _ -> ()
 
 let posToString = Common.posToString
 
@@ -312,19 +322,6 @@ let conGenerator () =
            case.c_guard |> iterExprOpt self;
            case.c_rhs |> iterExpr self)
   in
-  let isRaise : CL.Types.value_description -> bool = function
-    | {
-        val_kind =
-          Val_prim
-            {
-              prim_name =
-                ( "%raise" | "%reraise" | "%raise_notrace"
-                | "%raise_with_backtrace" );
-            };
-      } ->
-      true
-    | _ -> false
-  in
   let raiseArgs args =
     match args with
     | [(_, Some {CL.Typedtree.exp_desc = Texp_construct ({txt}, _, _)})] ->
@@ -364,22 +361,23 @@ let conGenerator () =
         }
         :: !currentEvents
     | Texp_apply
-        ( {exp_desc = Texp_ident (atat, _, _)},
+        ( {exp_desc = Texp_ident (_, _, atat)},
           [(_lbl1, Some {exp_desc = Texp_ident (_, _, val_desc)}); arg] )
       when (* raise @@ Exn(...) *)
-           atat |> CL.Path.name = "Pervasives.@@" && val_desc |> isRaise ->
+           atat |> isApply && val_desc |> isRaise ->
       let exceptions = [arg] |> raiseArgs in
       currentEvents := {Event.exceptions; loc; kind = Raises} :: !currentEvents;
       arg |> snd |> iterExprOpt self
     | Texp_apply
-        ( {exp_desc = Texp_ident (atat, _, _)},
+        ( {exp_desc = Texp_ident (_, _, atat)},
           [arg; (_lbl1, Some {exp_desc = Texp_ident (_, _, val_desc)})] )
       when (*  Exn(...) |> raise *)
-           atat |> CL.Path.name = "Pervasives.|>" && val_desc |> isRaise ->
+           atat |> isRevapply && val_desc |> isRaise ->
       let exceptions = [arg] |> raiseArgs in
       currentEvents := {Event.exceptions; loc; kind = Raises} :: !currentEvents;
       arg |> snd |> iterExprOpt self
     | Texp_apply (({exp_desc = Texp_ident (_, _, val_desc)} as e), args) ->
+      let () = print_prim val_desc in
       if val_desc |> isRaise then
         let exceptions = args |> raiseArgs in
         currentEvents :=

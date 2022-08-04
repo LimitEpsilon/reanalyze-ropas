@@ -32,7 +32,7 @@ let loadCmtFile cmtFilePath =
       !currentModule
       |> Name.create ~isInterface:(Filename.check_suffix !currentSrc "i");
     if runConfig.dce then cmt_infos |> DeadCode.processCmt ~cmtFilePath;
-    if runConfig.exception_ then cmt_infos |> Exception.processCmt;
+    if runConfig.exception_ then cmt_infos |> SetConstraints.processCmt;
     if runConfig.noalloc then cmt_infos |> Noalloc.processCmt;
     if runConfig.termination then cmt_infos |> Arnold.processCmt
   | _ -> ()
