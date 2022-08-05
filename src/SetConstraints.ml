@@ -416,7 +416,7 @@ let conGenerator () =
       currentEvents :=
         {Event.exceptions; loc; kind = Catches !currentEvents} :: oldEvents;
       cases |> iterCases self
-    | _ -> super.expr self expr |> ignore*;
+    | _ -> super.expr self expr |> ignore);
     (if isDoesNoRaise then
      let nestedEvents = !currentEvents in
      currentEvents :=
