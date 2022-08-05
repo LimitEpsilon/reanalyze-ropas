@@ -1,3 +1,76 @@
+type param = CL.Typedtree.pattern list
+and code_loc = CL.Location.t
+and expr = Expr_var of param | Expr of code_loc
+and tagged_expr = Val of expr | Packet of expr
+and env = Env_var | Env of (param * tagged_expr) list
+
+(* construct, record : name |> string_of_longident *)
+(* variant : CL.Asttypes.label *)
+and constr = string
+
+(* construct : need to know arity *)
+and fld = Kappa of constr * int | Lbl of constr
+
+(* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
+and opcode = string
+
+(* set expression type *)
+and se =
+  | Bot (* empty set *)
+  | Top (* _ *)
+  | Const of CL.Asttypes.constant
+  | Closure of param option * expr list * env (* lambda (p->e)+ / lazy *)
+  | Var of tagged_expr * env (* set variable *)
+  | App_V of se * expr option (* possible values *)
+  | App_P of se * expr option (* possible exn packets *)
+  | Con of fld * se list (* construct / record field *)
+  | Fld of se * fld (* field of a record / deconstruct *)
+  | Op of opcode * se list (* primitive operators *)
+  | Union of se * se (* union *)
+  | Inter of se * se (* intersection *)
+  | Comp of se (* complement *)
+  | Cond of se * se (* conditional set expression *)
+
+(* set constraint type *)
+(* A \supseteq B is translated to (A, B) *)
+and sc = se * se
+
+(* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
+let rec string_of_longident li =
+  match li with
+  | CL.Longident.Lident s -> s
+  | CL.Longident.Ldot (li, s) -> string_of_longident li ^ "." ^ s
+  | CL.Longident.Lapply (l1, l2) ->
+    (* applicative functor : see ocamlc -help | grep app-funct *)
+    string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
+
+let update_sc old_sc new_sc = old_sc := new_sc :: !old_sc
+
+let isRaise : CL.Types.value_description -> bool = function
+  | {
+      val_kind =
+        Val_prim
+          {
+            prim_name =
+              "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
+          };
+    } ->
+    true
+  | _ -> false
+
+let isApply : CL.Types.value_description -> bool = function
+  | {val_kind = Val_prim {prim_name = "%apply"}} -> true
+  | _ -> false
+
+let isRevapply : CL.Types.value_description -> bool = function
+  | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
+  | _ -> false
+
+let print_prim : CL.Types.value_description -> unit = function
+  | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
+    Printf.printf "prim_name: %s, prim_native_name: %S\n" s1 s2
+  | _ -> ()
+
 let posToString = Common.posToString
 
 module LocSet = Common.LocSet
@@ -248,27 +321,6 @@ let traverseAst () =
            case.CL.Typedtree.c_lhs |> iterPat self;
            case.c_guard |> iterExprOpt self;
            case.c_rhs |> iterExpr self)
-  in
-  let isRaise : CL.Types.value_description -> bool = function
-    | {
-        val_kind =
-          Val_prim
-            {
-              prim_name =
-                ( "%raise" | "%reraise" | "%raise_notrace"
-                | "%raise_with_backtrace" );
-            };
-      } ->
-      true
-    | _ -> false
-  in
-  let isApply : CL.Types.value_description -> bool = function
-    | {val_kind = Val_prim {prim_name = "%apply"}} -> true
-    | _ -> false
-  in
-  let isRevapply : CL.Types.value_description -> bool = function
-    | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
-    | _ -> false
   in
   let raiseArgs args =
     match args with
