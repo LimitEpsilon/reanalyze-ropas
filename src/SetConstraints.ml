@@ -377,7 +377,7 @@ let conGenerator () =
       currentEvents := {Event.exceptions; loc; kind = Raises} :: !currentEvents;
       arg |> snd |> iterExprOpt self
     | Texp_apply (({exp_desc = Texp_ident (_, _, val_desc)} as e), args) ->
-      let () = print_prim val_desc in
+      (* let () = print_prim val_desc in *)
       if val_desc |> isRaise then
         let exceptions = args |> raiseArgs in
         currentEvents :=
@@ -416,7 +416,7 @@ let conGenerator () =
       currentEvents :=
         {Event.exceptions; loc; kind = Catches !currentEvents} :: oldEvents;
       cases |> iterCases self
-    | _ -> super.expr self expr |> ignore);
+    | _ -> super.expr self expr |> ignore*;
     (if isDoesNoRaise then
      let nestedEvents = !currentEvents in
      currentEvents :=
