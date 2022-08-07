@@ -1,4 +1,5 @@
 type param = CL.Typedtree.pattern list
+and arg = expr option list
 and code_loc = CL.Location.t
 and expr = Expr_var of param | Expr of code_loc
 and tagged_expr = Val of expr | Packet of expr
@@ -19,10 +20,10 @@ and se =
   | Bot (* empty set *)
   | Top (* _ *)
   | Const of CL.Asttypes.constant
-  | Closure of param option * expr list * env (* lambda (p->e)+ / lazy *)
+  | Closure of param * expr list * env (* lambda (p->e)+ / lazy when param = nil *)
   | Var of tagged_expr * env (* set variable *)
-  | App_V of se * expr option (* possible values *)
-  | App_P of se * expr option (* possible exn packets *)
+  | App_V of se * arg (* possible values / force when arg = nil *)
+  | App_P of se * arg (* possible exn packets / force when arg = nil *)
   | Con of fld * se list (* construct / record field *)
   | Fld of se * fld (* field of a record / deconstruct *)
   | Op of opcode * se list (* primitive operators *)
