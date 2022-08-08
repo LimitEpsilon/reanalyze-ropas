@@ -20,11 +20,12 @@ and se =
   | Bot (* empty set *)
   | Top (* _ *)
   | Const of CL.Asttypes.constant
-  | Closure of param * expr list * env (* lambda (p->e)+ / lazy when param = nil *)
+  | Closure of
+      param * expr list * env (* lambda (p->e)+ / lazy when param = nil *)
   | Var of tagged_expr * env (* set variable *)
   | App_V of se * arg (* possible values / force when arg = nil *)
   | App_P of se * arg (* possible exn packets / force when arg = nil *)
-  | Con of fld * se list (* construct / record field *)
+  | Con of fld * se (* construct / record field *)
   | Fld of se * fld (* field of a record / deconstruct *)
   | Op of opcode * se list (* primitive operators *)
   | Union of se * se (* union *)
@@ -35,6 +36,23 @@ and se =
 (* set constraint type *)
 (* A \supseteq B is translated to (A, B) *)
 and sc = se * se
+
+and rule =
+  [ `APP
+  | `IGNORE
+  | `FN
+  | `VAR
+  | `LET
+  | `OP
+  | `CON
+  | `FIELD
+  | `SETFIELD
+  | `SEQ
+  | `CASE
+  | `HANDLE
+  | `RAISE
+  | `FOR
+  | `WHILE ]
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
 let rec string_of_longident li =
@@ -71,6 +89,10 @@ let print_prim : CL.Types.value_description -> unit = function
   | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
     Printf.printf "prim_name: %s, prim_native_name: %S\n" s1 s2
   | _ -> ()
+
+let decode : CL.Types.value_description -> rule = function
+  | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
+  | _ -> `APP
 
 let posToString = Common.posToString
 
@@ -140,7 +162,8 @@ module Event = struct
   type kind =
     | Catches of t list (* with | E => ... *)
     | Call of {callee : Common.Path.t; modulePath : Common.Path.t} (* foo() *)
-    | DoesNotRaise of t list (* DoesNotRaise(events) where events come from an expression *)
+    | DoesNotRaise of
+        t list (* DoesNotRaise(events) where events come from an expression *)
     | Raises  (** raise E *)
 
   and t = {exceptions : Exceptions.t; kind : kind; loc : CL.Location.t}
