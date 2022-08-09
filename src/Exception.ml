@@ -1,19 +1,49 @@
 type param = CL.Typedtree.pattern list
 and arg = expr option list
 and code_loc = CL.Location.t
-and expr = Expr_var of param | Expr of code_loc
+
+and expr =
+  | Expr_var of param
+  | Expr of code_loc
+  | Extern of string (* blackbox, includes I/O *)
+
 and tagged_expr = Val of expr | Packet of expr
 and env = Env_var | Env of (param * tagged_expr) list
 
-(* construct, record : name |> string_of_longident *)
+(* construct : name |> string_of_longident *)
 (* variant : CL.Asttypes.label *)
 and constr = string
 
 (* construct : need to know arity *)
-and fld = Kappa of constr * int | Lbl of constr
+(* record : translate field name to position(int, starts from 0) *)
+and fld = Kappa of constr * int | Lbl of se
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
-and opcode = string
+and arithop =
+  [ `ADD
+  | `SUB
+  | `DIV
+  | `MUL
+  | `NEG
+  | `ABS (* absolute value *)
+  | `MOD
+  | `AND
+  | `OR
+  | `NOT
+  | `XOR
+  | `LSL (* <<, logical *)
+  | `LSR (* >>, logical *)
+  | `ASR (* >>, arithmetic sign extension *)
+  | `SUCC (* ++x *)
+  | `PRED (* --x *) ]
+
+and relop =
+  [ `EQ (* == *)
+  | `NEQ (* != *)
+  | `LT (* < *)
+  | `LE (* <= *)
+  | `GT (* > *)
+  | `GE (* >= *) ]
 
 (* set expression type *)
 and se =
@@ -27,7 +57,8 @@ and se =
   | App_P of se * arg (* possible exn packets / force when arg = nil *)
   | Con of fld * se (* construct / record field *)
   | Fld of se * fld (* field of a record / deconstruct *)
-  | Op of opcode * se list (* primitive operators *)
+  | Arith of arithop * se list (* arithmetic operators *)
+  | Rel of relop * se list (* relation operators *)
   | Union of se * se (* union *)
   | Inter of se * se (* intersection *)
   | Comp of se (* complement *)
@@ -39,7 +70,12 @@ and sc = se * se
 
 and rule =
   [ `APP
+  | `FORCE
   | `IGNORE
+  | `IDENTITY
+  | `ARITH
+  | `REL
+  | `EXTERN
   | `FN
   | `VAR
   | `LET
@@ -93,6 +129,12 @@ let print_prim : CL.Types.value_description -> unit = function
 let decode : CL.Types.value_description -> rule = function
   | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
   | _ -> `APP
+
+let generateCon : rule -> CL.Typedtree.expression -> sc list = function
+  | `APP | `FORCE | `IGNORE | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR
+  | `LET | `OP | `CON | `FIELD | `SETFIELD | `SEQ | `CASE | `HANDLE | `RAISE
+  | `FOR | `WHILE ->
+    fun e -> []
 
 let posToString = Common.posToString
 
