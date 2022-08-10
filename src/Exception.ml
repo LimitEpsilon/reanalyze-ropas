@@ -1,14 +1,19 @@
 type param = CL.Typedtree.pattern list
-and arg = expr option list
+and arg = code_loc expr option list
 and code_loc = CL.Location.t
 
-and expr =
-  | Expr_var of param
-  | Expr of code_loc
-  | Extern of string (* blackbox, includes I/O *)
+and _ expr =
+  | Expr_var : param -> param expr
+  | Expr : code_loc -> code_loc expr
+  | Extern :
+      string * CL.Types.type_desc
+      -> code_loc expr (* blackbox, includes I/O *)
 
-and tagged_expr = Val of expr | Packet of expr
-and env = Env_var | Env of (param * tagged_expr) list
+and _ tagged_expr =
+  | Val : 'a expr -> 'a tagged_expr
+  | Packet : 'a expr -> 'a tagged_expr
+
+and env = Env_var | Env of (param * code_loc tagged_expr) list
 
 (* construct : name |> string_of_longident *)
 (* variant : CL.Asttypes.label *)
@@ -16,7 +21,7 @@ and constr = string
 
 (* construct : need to know arity *)
 (* record : translate field name to position(int, starts from 0) *)
-and fld = Kappa of constr * int | Lbl of se
+and _ fld = Kappa : constr * int -> 'a fld | Lbl : 'a se -> 'a fld
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
 and arithop =
@@ -46,27 +51,34 @@ and relop =
   | `GE (* >= *) ]
 
 (* set expression type *)
-and se =
-  | Bot (* empty set *)
-  | Top (* _ *)
-  | Const of CL.Asttypes.constant
-  | Closure of
-      param * expr list * env (* lambda (p->e)+ / lazy when param = nil *)
-  | Var of tagged_expr * env (* set variable *)
-  | App_V of se * arg (* possible values / force when arg = nil *)
-  | App_P of se * arg (* possible exn packets / force when arg = nil *)
-  | Con of fld * se (* construct / record field *)
-  | Fld of se * fld (* field of a record / deconstruct *)
-  | Arith of arithop * se list (* arithmetic operators *)
-  | Rel of relop * se list (* relation operators *)
-  | Union of se * se (* union *)
-  | Inter of se * se (* intersection *)
-  | Comp of se (* complement *)
-  | Cond of se * se (* conditional set expression *)
+and _ se =
+  | Bot : 'a se (* empty set *)
+  | Top : 'a se (* _ *)
+  | Const : CL.Asttypes.constant -> 'a se
+  | Closure :
+      param * code_loc expr list * env
+      -> env se (* lambda (p->e)+ / lazy when param = nil *)
+  | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
+  | Var :
+      code_loc tagged_expr
+      -> unit se (* set variable, context-insensitive *)
+  | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
+  | App_V : 'a se * arg -> 'a se (* possible values / force when arg = nil *)
+  | App_P :
+      'a se * arg
+      -> 'a se (* possible exn packets / force when arg = nil *)
+  | Con : 'a fld * 'a se -> 'a se (* construct / record field *)
+  | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
+  | Arith : arithop * 'a se list -> 'a se (* arithmetic operators *)
+  | Rel : relop * 'a se list -> 'a se (* relation operators *)
+  | Union : 'a se * 'a se -> 'a se (* union *)
+  | Inter : 'a se * 'a se -> 'a se (* intersection *)
+  | Comp : 'a se -> 'a se (* complement *)
+  | Cond : 'a se * 'a se -> 'a se (* conditional set expression *)
 
 (* set constraint type *)
 (* A \supseteq B is translated to (A, B) *)
-and sc = se * se
+and 'a sc = 'a se * 'a se
 
 and rule =
   [ `APP
@@ -101,18 +113,6 @@ let rec string_of_longident li =
 
 let update_sc old_sc new_sc = old_sc := new_sc :: !old_sc
 
-let isRaise : CL.Types.value_description -> bool = function
-  | {
-      val_kind =
-        Val_prim
-          {
-            prim_name =
-              "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
-          };
-    } ->
-    true
-  | _ -> false
-
 let isApply : CL.Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%apply"}} -> true
   | _ -> false
@@ -130,11 +130,33 @@ let decode : CL.Types.value_description -> rule = function
   | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
   | _ -> `APP
 
-let generateCon : rule -> CL.Typedtree.expression -> sc list = function
-  | `APP | `FORCE | `IGNORE | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR
-  | `LET | `OP | `CON | `FIELD | `SETFIELD | `SEQ | `CASE | `HANDLE | `RAISE
-  | `FOR | `WHILE ->
-    fun e -> []
+let isRaise : CL.Types.value_description -> bool = fun v ->
+  match decode v with
+  | `RAISE -> true
+  | _ -> false
+
+let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit sc list =
+  function
+  | `APP -> (
+    function
+    | Texp_apply ({exp_desc = Texp_ident (_, _, atat)}, [(_, Some fn); arg])
+      when (* f @@ x *)
+           atat |> isApply ->
+      generateCon `APP (Texp_apply (fn, [arg]))
+    | Texp_apply ({exp_desc = Texp_ident (_, _, atat)}, [arg; (_, Some fn)])
+      when (* x |> f *)
+           atat |> isRevapply ->
+      generateCon `APP (Texp_apply (fn, [arg]))
+    | Texp_apply (fn, arg) -> []
+    | Texp_lazy e -> []
+    | _ -> failwith "Tried to apply APP rule for the wrong expression!")
+  | `FORCE | `IGNORE | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
+  | `OP | `CON | `FIELD | `SETFIELD -> (
+    function Texp_apply (a, b) -> [] | _ -> [])
+  | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun e -> []
+
+let rec augmentCon : unit sc -> env sc = function
+  | _ -> (Bot, Top)
 
 let posToString = Common.posToString
 

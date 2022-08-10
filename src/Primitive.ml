@@ -1,8 +1,9 @@
 let decode_prim = function
   | "%identity" | "%bytes_to_string" | "%bytes_of_string" -> `IDENTITY
   | "%ignore" -> `IGNORE
-  | "%revapply" | "%apply" | "%loc_LOC" | "%loc_FILE" | "%loc_LINE" | "%loc_"
-  | "%loc_MODULE" | "%loc_FUNCTION" ->
+  | "%revapply" | "%apply" -> `APP
+  | "%loc_LOC" | "%loc_FILE" | "%loc_LINE" | "%loc_" | "%loc_MODULE"
+  | "%loc_FUNCTION" ->
     `EXTERN
   | "%field0" | "%field1" -> `FIELD
   | "%setfield0" -> `SETFIELD
@@ -93,3 +94,5 @@ let decode_prim = function
   | "%runstack" | "%reperform" | "%perform" | "%resume" (* effects *)
   | "%dls_get" (* domain-local-state *) | _ ->
     `EXTERN
+
+let setfield x y = [x;y]
