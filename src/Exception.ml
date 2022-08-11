@@ -138,35 +138,17 @@ let decode : CL.Types.value_description -> rule = function
 let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
-(* add bindings to globalenv *)
+(* add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
-  | (Texp_ident _ | Texp_constant _) as d -> ()
   | Texp_let (rec_flag, list, exp) -> ()
   | Texp_function {arg_label; param; cases; partial} -> ()
-  | Texp_apply (exp, list) -> ()
-  | Texp_match _ -> () (* in recent versions, (exp, cases, partial). in 4.06.1, (exp, case, exn_case, partial) *)
-  | Texp_try (exp, cases) -> () | Texp_tuple list -> ()
-  | Texp_construct (lid, cd, args) -> ()
-  | Texp_variant (l, expo) -> ()
-  | Texp_record {fields; representation; extended_expression} -> ()
-  | Texp_field (exp, lid, ld) -> ()
-  | Texp_setfield (exp1, lid, ld, exp2) -> ()
-  | Texp_array list -> ()
-  | Texp_ifthenelse (exp1, exp2, expo) -> ()
-  | Texp_sequence (exp1, exp2) -> ()
-  | Texp_while (exp1, exp2) -> ()
-  | Texp_for (id, p, exp1, exp2, dir, exp3) -> ()
-  | Texp_send _ -> ()
-  | (Texp_new _ | Texp_instvar _) as d -> ()
-  | Texp_setinstvar _ | Texp_override _ -> assert false
-  | Texp_letmodule _ -> ()
-  | Texp_letexception (cd, exp) -> ()
-  | Texp_assert exp -> ()
-  | Texp_lazy exp -> ()
-  | Texp_object _ -> ()
-  | Texp_pack mexpr -> ()
-  | Texp_unreachable -> ()
-  | Texp_extension_constructor _ as e -> ()
+#if OCAML_VERSION < (4, 10, 0)
+  | Texp_match (exp, case, exn_case, partial) -> ()
+#else
+  | Texp_match (exp, cases, partial) -> ()
+#endif
+  | Texp_try (exp, cases) -> ()
+  | _ -> ()
 
 let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit =
   function
