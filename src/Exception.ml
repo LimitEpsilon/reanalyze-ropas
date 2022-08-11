@@ -59,9 +59,7 @@ and _ se =
       param * code_loc expr list * env
       -> env se (* lambda (p->e)+ / lazy when param = nil *)
   | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
-  | Var :
-      code_loc tagged_expr
-      -> unit se (* set variable, context-insensitive *)
+  | Var : 'a tagged_expr -> unit se (* set variable, context-insensitive *)
   | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
   | App_V : 'a se * arg -> 'a se (* possible values / force when arg = nil *)
   | App_P :
@@ -75,10 +73,6 @@ and _ se =
   | Inter : 'a se * 'a se -> 'a se (* intersection *)
   | Comp : 'a se -> 'a se (* complement *)
   | Cond : 'a se * 'a se -> 'a se (* conditional set expression *)
-
-(* set constraint type *)
-(* A \supseteq B is translated to (A, B) *)
-and 'a sc = 'a se * 'a se
 
 and rule =
   [ `APP
@@ -101,6 +95,17 @@ and rule =
   | `RAISE
   | `FOR
   | `WHILE ]
+
+module Param = struct
+  type t = param
+  let compare = compare
+end
+
+module Globalenv = Map.Make(Param)
+
+let insensitive : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
+let sensitive : (env se, env se) Hashtbl.t = Hashtbl.create 256
+let globalenv : code_loc expr Globalenv.t ref = ref Globalenv.empty
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
 let rec string_of_longident li =
@@ -130,12 +135,40 @@ let decode : CL.Types.value_description -> rule = function
   | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
   | _ -> `APP
 
-let isRaise : CL.Types.value_description -> bool = fun v ->
-  match decode v with
-  | `RAISE -> true
-  | _ -> false
+let isRaise : CL.Types.value_description -> bool =
+ fun v -> match decode v with `RAISE -> true | _ -> false
 
-let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit sc list =
+(* add bindings to globalenv *)
+let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
+  | (Texp_ident _ | Texp_constant _) as d -> ()
+  | Texp_let (rec_flag, list, exp) -> ()
+  | Texp_function {arg_label; param; cases; partial} -> ()
+  | Texp_apply (exp, list) -> ()
+  | Texp_match _ -> () (* in recent versions, (exp, cases, partial). in 4.06.1, (exp, case, exn_case, partial) *)
+  | Texp_try (exp, cases) -> () | Texp_tuple list -> ()
+  | Texp_construct (lid, cd, args) -> ()
+  | Texp_variant (l, expo) -> ()
+  | Texp_record {fields; representation; extended_expression} -> ()
+  | Texp_field (exp, lid, ld) -> ()
+  | Texp_setfield (exp1, lid, ld, exp2) -> ()
+  | Texp_array list -> ()
+  | Texp_ifthenelse (exp1, exp2, expo) -> ()
+  | Texp_sequence (exp1, exp2) -> ()
+  | Texp_while (exp1, exp2) -> ()
+  | Texp_for (id, p, exp1, exp2, dir, exp3) -> ()
+  | Texp_send _ -> ()
+  | (Texp_new _ | Texp_instvar _) as d -> ()
+  | Texp_setinstvar _ | Texp_override _ -> assert false
+  | Texp_letmodule _ -> ()
+  | Texp_letexception (cd, exp) -> ()
+  | Texp_assert exp -> ()
+  | Texp_lazy exp -> ()
+  | Texp_object _ -> ()
+  | Texp_pack mexpr -> ()
+  | Texp_unreachable -> ()
+  | Texp_extension_constructor _ as e -> ()
+
+let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit =
   function
   | `APP -> (
     function
@@ -147,17 +180,15 @@ let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit sc list =
       when (* x |> f *)
            atat |> isRevapply ->
       generateCon `APP (Texp_apply (fn, [arg]))
-    | Texp_apply (fn, arg) -> []
-    | Texp_lazy e -> []
+    | Texp_apply (fn, arg) -> ()
+    | Texp_lazy e -> ()
     | _ -> failwith "Tried to apply APP rule for the wrong expression!")
   | `FORCE | `IGNORE | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
   | `OP | `CON | `FIELD | `SETFIELD -> (
-    function Texp_apply (a, b) -> [] | _ -> [])
-  | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun e -> []
+    function Texp_apply (a, b) -> () | _ -> ())
+  | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun e -> ()
 
-let rec augmentCon : unit sc -> env sc = function
-  | _ -> (Bot, Top)
-
+let rec augmentCon : unit se -> env se = function _ -> Top
 let posToString = Common.posToString
 
 module LocSet = Common.LocSet
