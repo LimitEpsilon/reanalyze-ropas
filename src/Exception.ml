@@ -142,7 +142,7 @@ let isRaise : CL.Types.value_description -> bool =
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | Texp_let (rec_flag, list, exp) -> ()
   | Texp_function {arg_label; param; cases; partial} -> ()
-#if OCAML_VERSION < (4, 10, 0)
+#if OCAML_VERSION < (4, 08, 0)
   | Texp_match (exp, case, exn_case, partial) -> ()
 #else
   | Texp_match (exp, cases, partial) -> ()
