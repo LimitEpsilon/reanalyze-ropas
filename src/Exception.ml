@@ -66,8 +66,8 @@ and _ se =
       'a se * arg
       -> 'a se (* possible exn packets / force when arg = nil *)
   | Con : 'a fld * 'a se -> 'a se (* construct / record field *)
-        (* con(l, x) >= y <=> fld(y, l) >= x *)
-        (* concretization is the set of constructs when accessed with field l gives *at least* x *)
+  (* con(l, x) >= y <=> fld(y, l) >= x *)
+  (* concretization is the set of constructs when accessed with field l gives *at least* x *)
   | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
   | Arith : arithop * 'a se list -> 'a se (* arithmetic operators *)
   | Rel : relop * 'a se list -> 'a se (* relation operators *)
@@ -100,10 +100,11 @@ and rule =
 
 module Param = struct
   type t = param
+
   let compare = compare
 end
 
-module Globalenv = Map.Make(Param)
+module Globalenv = Map.Make (Param)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
@@ -140,15 +141,12 @@ let decode : CL.Types.value_description -> rule = function
 let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
-let updateGlobal key data =
-  globalenv := Globalenv.add key data !globalenv
+let updateGlobal key data = globalenv := Globalenv.add key data !globalenv
 
 let extract c =
   let lhs = c.CL.Typedtree.c_lhs in
   let guard = c.CL.Typedtree.c_guard in
-  match guard with
-  | None -> (lhs, false)
-  | _ -> (lhs, true)
+  match guard with None -> (lhs, false) | _ -> (lhs, true)
 
 (* add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
@@ -221,26 +219,29 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | _ -> ()
 
 and solveParam (acc : unit se) (pattern, guarded) =
-    if guarded
-    then (solveEq pattern acc |> ignore; acc)
-    else Diff (acc, solveEq pattern acc)
+  if guarded then (
+    solveEq pattern acc |> ignore;
+    acc)
+  else Diff (acc, solveEq pattern acc)
 
 and updateVar key data =
-  if CL.Ident.Tbl.mem var_to_se key
-  then
+  if CL.Ident.Tbl.mem var_to_se key then (
     let original = CL.Ident.Tbl.find var_to_se key in
     CL.Ident.Tbl.remove var_to_se key;
-    CL.Ident.Tbl.add var_to_se key (Union (data, original))
-  else
-    CL.Ident.Tbl.add var_to_se key data
+    CL.Ident.Tbl.add var_to_se key (Union (data, original)))
+  else CL.Ident.Tbl.add var_to_se key data
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
 and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
   match p.pat_desc with
   | Tpat_any -> Top
-  | Tpat_var (x, _) -> updateVar x se; Top
-  | Tpat_alias (p, a, _) -> updateVar a se; solveEq p se
+  | Tpat_var (x, _) ->
+    updateVar x se;
+    Top
+  | Tpat_alias (p, a, _) ->
+    updateVar a se;
+    solveEq p se
   | Tpat_constant c -> Const c
   | Tpat_tuple list -> solveCon None se list
 #if OCAML_VERSION >= (4, 13, 0)
@@ -250,15 +251,17 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
 #endif
     let constructor = string_of_longident txt in
     solveCon (Some constructor) se list
-  | Tpat_variant (lbl, p_o, _) ->
+  | Tpat_variant (lbl, p_o, _) -> (
     let constructor = Some lbl in
-    (match p_o with
-     | None -> Con ((constructor, Bot), Bot)
-     | Some p ->
-       let sub = solveEq p (Fld (se, (constructor, se_of_int 0))) in
-       Con ((constructor, se_of_int 0), sub))
+    match p_o with
+    | None -> Con ((constructor, Bot), Top)
+    | Some p ->
+      let sub = solveEq p (Fld (se, (constructor, se_of_int 1))) in
+      Con ((constructor, se_of_int 1), sub))
   | Tpat_record (key_val_list, _) ->
-    let list = List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list in
+    let list =
+      List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
+    in
     solveRec se list
   | Tpat_array list -> solveCon None se list
   | Tpat_lazy p -> solveEq p (App_V (se, []))
@@ -267,36 +270,35 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
 and solveCon constructor se list =
   let l = ref list in
   let i = ref 0 in
-  let s = ref (Con ((constructor, Bot), Bot)) in
+  let s = ref (Con ((constructor, Bot), Top)) in
   while !l != [] do
     (match !l with
-     | hd :: tl ->
-       let ith_se = solveEq hd (Fld (se, (constructor, se_of_int !i))) in
-       let s' = Con ((constructor, se_of_int !i), ith_se) in
-       (if !i = 0 then s := s' else s := Inter (!s, s'));
-       l := tl
-     | _ -> assert false);
+    | hd :: tl ->
+      let ith_se = solveEq hd (Fld (se, (constructor, se_of_int !i))) in
+      let s' = Con ((constructor, se_of_int !i), ith_se) in
+      if !i = 0 then s := s' else s := Inter (!s, s');
+      l := tl
+    | _ -> assert false);
     i := !i + 1
   done;
   !s
 
 and solveRec se list =
-    let l = ref list in
-    let s = ref Top in
-    while !l != [] do
-      (match !l with
-       | hd :: tl ->
-         let i, p = hd in
-         let ith_se = solveEq p (Fld (se, (None, se_of_int i))) in
-         let s' = Con ((None, se_of_int i), ith_se) in
-         (if !s = Top then s := s' else s := Inter (!s, s'));
-         l := tl
-       | _ -> assert false)
-    done;
-    !s
+  let l = ref list in
+  let s = ref Top in
+  while !l != [] do
+    match !l with
+    | hd :: tl ->
+      let i, p = hd in
+      let ith_se = solveEq p (Fld (se, (None, se_of_int i))) in
+      let s' = Con ((None, se_of_int i), ith_se) in
+      if !s = Top then s := s' else s := Inter (!s, s');
+      l := tl
+    | _ -> assert false
+  done;
+  !s
 
-let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit =
-  function
+let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit = function
   | `APP -> (
     function
     | Texp_apply ({exp_desc = Texp_ident (_, _, atat)}, [(_, Some fn); arg])
