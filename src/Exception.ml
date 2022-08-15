@@ -21,7 +21,7 @@ and constr = string
 
 (* construct : need to know arity *)
 (* record : translate field name to position(int, starts from 0) *)
-and _ fld = Kappa : constr * int -> 'a fld | Lbl : 'a se -> 'a fld
+and 'a fld = constr option * 'a se
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
 and arithop =
@@ -55,10 +55,10 @@ and _ se =
   | Bot : 'a se (* empty set *)
   | Top : 'a se (* _ *)
   | Const : CL.Asttypes.constant -> 'a se
+  | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Closure :
       param * code_loc expr list * env
       -> env se (* lambda (p->e)+ / lazy when param = nil *)
-  | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Var : 'a tagged_expr -> unit se (* set variable, context-insensitive *)
   | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
   | App_V : 'a se * arg -> 'a se (* possible values / force when arg = nil *)
@@ -66,12 +66,14 @@ and _ se =
       'a se * arg
       -> 'a se (* possible exn packets / force when arg = nil *)
   | Con : 'a fld * 'a se -> 'a se (* construct / record field *)
+        (* con(l, x) >= y <=> fld(y, l) >= x *)
+        (* concretization is the set of constructs when accessed with field l gives *at least* x *)
   | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
   | Arith : arithop * 'a se list -> 'a se (* arithmetic operators *)
   | Rel : relop * 'a se list -> 'a se (* relation operators *)
   | Union : 'a se * 'a se -> 'a se (* union *)
   | Inter : 'a se * 'a se -> 'a se (* intersection *)
-  | Comp : 'a se -> 'a se (* complement *)
+  | Diff : 'a se * 'a se -> 'a se (* difference *)
   | Cond : 'a se * 'a se -> 'a se (* conditional set expression *)
 
 and rule =
@@ -103,9 +105,11 @@ end
 
 module Globalenv = Map.Make(Param)
 
-let insensitive : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
-let sensitive : (env se, env se) Hashtbl.t = Hashtbl.create 256
-let globalenv : code_loc expr Globalenv.t ref = ref Globalenv.empty
+let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
+let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
+let globalenv : code_loc tagged_expr Globalenv.t ref = ref Globalenv.empty
+let var_to_se : unit se CL.Ident.Tbl.t = CL.Ident.Tbl.create 256
+let undetermined_var : unit se CL.Ident.Tbl.t = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
 let rec string_of_longident li =
@@ -115,8 +119,6 @@ let rec string_of_longident li =
   | CL.Longident.Lapply (l1, l2) ->
     (* applicative functor : see ocamlc -help | grep app-funct *)
     string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
-
-let update_sc old_sc new_sc = old_sc := new_sc :: !old_sc
 
 let isApply : CL.Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%apply"}} -> true
@@ -138,17 +140,160 @@ let decode : CL.Types.value_description -> rule = function
 let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
+let updateGlobal key data =
+  globalenv := Globalenv.add key data !globalenv
+
+let extract c =
+  let lhs = c.CL.Typedtree.c_lhs in
+  let guard = c.CL.Typedtree.c_guard in
+  match guard with
+  | None -> (lhs, false)
+  | _ -> (lhs, true)
+
 (* add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
-  | Texp_let (rec_flag, list, exp) -> ()
-  | Texp_function {arg_label; param; cases; partial} -> ()
+  | Texp_let (_, list, _) ->
+    let value_bind acc binding =
+      let pattern = binding.CL.Typedtree.vb_pat in
+      let expr = Val (Expr binding.CL.Typedtree.vb_expr.exp_loc) in
+      solveEq pattern (Var expr) |> ignore;
+      updateGlobal [pattern] expr
+    in
+    List.fold_left value_bind () list
+  | Texp_function {cases} ->
+    let value_pg = List.map extract cases in
+    let value_p, _ = List.split value_pg in
+    let value_expr = Val (Expr_var value_p) in
+    List.fold_left solveParam (Var value_expr) value_pg |> ignore
 #if OCAML_VERSION < (4, 08, 0)
-  | Texp_match (exp, case, exn_case, partial) -> ()
+  | Texp_match (exp, cases, exn_cases, _) ->
+    let value_pg = List.map extract cases in
+    let exn_pg = List.map extract exn_cases in
+    let value_p, _ = List.split value_pg in
+    let exn_p, _ = List.split exn_pg in
+    let value_expr = Val (Expr exp.exp_loc) in
+    let exn_expr = Packet (Expr exp.exp_loc) in
+    updateGlobal value_p value_expr;
+    List.fold_left solveParam (Var value_expr) value_pg |> ignore;
+    updateGlobal exn_p exn_expr;
+    List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
 #else
-  | Texp_match (exp, cases, partial) -> ()
+  | Texp_match (exp, cases, _) ->
+    let p, g = List.split @@ List.map extract cases in
+    let o =  List.map Typedtree.split_pattern p in
+    let rec filter o g = match o with
+      | (Some v, Some e) :: o' -> (match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v :: v_p, b :: v_g, e :: e_p, b :: e_g)
+        | _ -> assert false)
+      | (Some v, None) :: o' -> (match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v :: v_p, b :: v_g, e_p, e_g)
+        | _ -> assert false)
+      | (None, Some e) :: o' -> (match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v_p, v_g, e :: e_p, b :: e_g)
+        | _ -> assert false)
+      | (None, None) :: o' -> (match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v_p, v_g, e_p, e_g)
+        | _ -> assert false)
+      | [] -> ([], [], [], [])
+    in
+    let value_p, value_g, exn_p, exn_g = filter o g in
+    let value_expr = Val (Expr exp.exp_loc) in
+    let exn_expr = Packet (Expr exp.exp_loc) in
+    updateGlobal value_p value_expr;
+    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g) |> ignore;
+    updateGlobal exn_p exn_expr;
+    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g) |> ignore
 #endif
-  | Texp_try (exp, cases) -> ()
+  | Texp_try (exp, cases) ->
+    let exn_pg = List.map extract cases in
+    let exn_p, _ = List.split exn_pg in
+    let exn_expr = Packet (Expr exp.exp_loc) in
+    updateGlobal exn_p exn_expr;
+    List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
   | _ -> ()
+
+and solveParam (acc : unit se) (pattern, guarded) =
+    if guarded
+    then (solveEq pattern acc |> ignore; acc)
+    else Diff (acc, solveEq pattern acc)
+
+and updateVar key data =
+  if CL.Ident.Tbl.mem var_to_se key
+  then
+    let original = CL.Ident.Tbl.find var_to_se key in
+    CL.Ident.Tbl.remove var_to_se key;
+    CL.Ident.Tbl.add var_to_se key (Union (data, original))
+  else
+    CL.Ident.Tbl.add var_to_se key data
+
+and se_of_int n = Const (CL.Asttypes.Const_int n)
+
+and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
+  match p.pat_desc with
+  | Tpat_any -> Top
+  | Tpat_var (x, _) -> updateVar x se; Top
+  | Tpat_alias (p, a, _) -> updateVar a se; solveEq p se
+  | Tpat_constant c -> Const c
+  | Tpat_tuple list -> solveCon None se list
+#if OCAML_VERSION >= (4, 13, 0)
+  | Tpat_construct ({txt}, _, list, _) ->
+#else
+  | Tpat_construct ({txt}, _, list) ->
+#endif
+    let constructor = string_of_longident txt in
+    solveCon (Some constructor) se list
+  | Tpat_variant (lbl, p_o, _) ->
+    let constructor = Some lbl in
+    (match p_o with
+     | None -> Con ((constructor, Bot), Bot)
+     | Some p ->
+       let sub = solveEq p (Fld (se, (constructor, se_of_int 0))) in
+       Con ((constructor, se_of_int 0), sub))
+  | Tpat_record (key_val_list, _) ->
+    let list = List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list in
+    solveRec se list
+  | Tpat_array list -> solveCon None se list
+  | Tpat_lazy p -> solveEq p (App_V (se, []))
+  | Tpat_or (lhs, rhs, _) -> Union (solveEq lhs se, solveEq rhs se)
+
+and solveCon constructor se list =
+  let l = ref list in
+  let i = ref 0 in
+  let s = ref (Con ((constructor, Bot), Bot)) in
+  while !l != [] do
+    (match !l with
+     | hd :: tl ->
+       let ith_se = solveEq hd (Fld (se, (constructor, se_of_int !i))) in
+       let s' = Con ((constructor, se_of_int !i), ith_se) in
+       (if !i = 0 then s := s' else s := Inter (!s, s'));
+       l := tl
+     | _ -> assert false);
+    i := !i + 1
+  done;
+  !s
+
+and solveRec se list =
+    let l = ref list in
+    let s = ref Top in
+    while !l != [] do
+      (match !l with
+       | hd :: tl ->
+         let i, p = hd in
+         let ith_se = solveEq p (Fld (se, (None, se_of_int i))) in
+         let s' = Con ((None, se_of_int i), ith_se) in
+         (if !s = Top then s := s' else s := Inter (!s, s'));
+         l := tl
+       | _ -> assert false)
+    done;
+    !s
 
 let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit =
   function
