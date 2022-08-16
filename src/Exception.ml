@@ -829,7 +829,6 @@ let traverseAst () =
 
     (* Generate SCs  *)
     updateEnv expr.exp_desc;
-    if !Common.Cli.debug then print_sc_info ();
 
     (match expr.exp_desc with
     | Texp_ident (callee_, _, val_desc) ->
@@ -1029,7 +1028,8 @@ let traverseAst () =
 
 let processStructure (structure : CL.Typedtree.structure) =
   let traverseAst = traverseAst () in
-  structure |> traverseAst.structure traverseAst |> ignore
+  structure |> traverseAst.structure traverseAst |> ignore;
+  (if !Common.Cli.debug then print_sc_info ())
 
 let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   match cmt_infos.cmt_annots with
