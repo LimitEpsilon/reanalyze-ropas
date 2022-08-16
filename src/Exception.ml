@@ -105,6 +105,7 @@ module Param = struct
 end
 
 module Globalenv = Map.Make (Param)
+(** Map chosen to avoid excessive hash collisions due to Param *)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
@@ -148,7 +149,7 @@ let extract c =
   let guard = c.CL.Typedtree.c_guard in
   match guard with None -> (lhs, false) | _ -> (lhs, true)
 
-(* add bindings to globalenv when new pattern is introduced *)
+(** add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | Texp_let (_, list, _) ->
     let value_bind acc binding =
@@ -178,24 +179,29 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
 #else
   | Texp_match (exp, cases, _) ->
     let p, g = List.split @@ List.map extract cases in
-    let o =  List.map Typedtree.split_pattern p in
-    let rec filter o g = match o with
-      | (Some v, Some e) :: o' -> (match g with
+    let o = List.map Typedtree.split_pattern p in
+    let rec filter o g =
+      match o with
+      | (Some v, Some e) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v :: v_p, b :: v_g, e :: e_p, b :: e_g)
         | _ -> assert false)
-      | (Some v, None) :: o' -> (match g with
+      | (Some v, None) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v :: v_p, b :: v_g, e_p, e_g)
         | _ -> assert false)
-      | (None, Some e) :: o' -> (match g with
+      | (None, Some e) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v_p, v_g, e :: e_p, b :: e_g)
         | _ -> assert false)
-      | (None, None) :: o' -> (match g with
+      | (None, None) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v_p, v_g, e_p, e_g)
@@ -206,9 +212,11 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     let value_expr = Val (Expr exp.exp_loc) in
     let exn_expr = Packet (Expr exp.exp_loc) in
     updateGlobal value_p value_expr;
-    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g) |> ignore;
+    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g)
+    |> ignore;
     updateGlobal exn_p exn_expr;
-    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g) |> ignore
+    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g)
+    |> ignore
 #endif
   | Texp_try (exp, cases) ->
     let exn_pg = List.map extract cases in
@@ -218,6 +226,7 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
   | _ -> ()
 
+(** Solves p_1 = se; p_2 = se - p_1; ... *)
 and solveParam (acc : unit se) (pattern, guarded) =
   if guarded then (
     solveEq pattern acc |> ignore;
@@ -233,6 +242,7 @@ and updateVar key data =
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
+(** Solves p = se and returns the set expression for p *)
 and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
   match p.pat_desc with
   | Tpat_any -> Top
