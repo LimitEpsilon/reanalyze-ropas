@@ -17,11 +17,11 @@ and env = Env_var | Env of (param * code_loc tagged_expr) list
 
 (* construct : name |> string_of_longident *)
 (* variant : CL.Asttypes.label *)
-and constr = string
+and ctor = string option
 
 (* construct : need to know arity *)
 (* record : translate field name to position(int, starts from 0) *)
-and 'a fld = constr option * 'a se
+and 'a fld = ctor * 'a se
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
 and arithop =
@@ -44,7 +44,7 @@ and arithop =
 
 and relop =
   [ `EQ (* == *)
-  | `NEQ (* != *)
+  | `NE (* != *)
   | `LT (* < *)
   | `LE (* <= *)
   | `GT (* > *)
@@ -65,9 +65,7 @@ and _ se =
   | App_P :
       'a se * arg
       -> 'a se (* possible exn packets / force when arg = nil *)
-  | Con : 'a fld * 'a se -> 'a se (* construct / record field *)
-  (* con(l, x) >= y <=> fld(y, l) >= x *)
-  (* concretization is the set of constructs when accessed with field l gives *at least* x *)
+  | Ctor : ctor * 'a se list -> 'a se (* construct / record field *)
   | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
   | Arith : arithop * 'a se list -> 'a se (* arithmetic operators *)
   | Rel : relop * 'a se list -> 'a se (* relation operators *)
@@ -98,6 +96,166 @@ and rule =
   | `FOR
   | `WHILE ]
 
+let string_of_arithop : arithop -> string = function
+  | `ADD -> "+"
+  | `SUB -> "-"
+  | `DIV -> "÷"
+  | `MUL -> "×"
+  | `NEG -> "~-"
+  | `ABS -> "abs"
+  | `MOD -> "mod"
+  | `AND -> "&&"
+  | `OR -> "||"
+  | `NOT -> "not"
+  | `XOR -> "xor"
+  | `LSL -> "lsl"
+  | `LSR -> "lsr"
+  | `ASR -> "asr"
+  | `SUCC -> "++"
+  | `PRED -> "--"
+
+let string_of_relop : relop -> string = function
+  | `EQ -> "=="
+  | `NE -> "!="
+  | `LT -> "<"
+  | `LE -> "<="
+  | `GT -> ">"
+  | `GE -> ">="
+
+let print_param par =
+  prerr_string "[";
+  let print_pattern pat =
+    CL.Printpat.pretty_pat pat;
+    prerr_string "; "
+  in
+  List.iter print_pattern par;
+  prerr_string "]"
+
+let print_expr (type k) (e : k expr) =
+  match e with
+  | Expr_var p ->
+    prerr_string "Expr_var (";
+    print_param p;
+    prerr_string ")"
+  | Expr loc ->
+    prerr_string "Expr (";
+    CL.Location.print_loc Format.str_formatter loc;
+    prerr_string (Format.flush_str_formatter ());
+    prerr_string ")"
+  | Extern (s, _) ->
+    prerr_string "Extern (";
+    prerr_string s;
+    prerr_string ")"
+
+let print_tagged_expr (type k) (e : k tagged_expr) =
+  match e with
+  | Val v ->
+    prerr_string "Val (";
+    print_expr v;
+    prerr_string ")"
+  | Packet p ->
+    prerr_string "Packet (";
+    print_expr p;
+    prerr_string ")"
+
+let rec print_se (se : unit se) =
+  match se with
+  | Bot -> prerr_string "⊥"
+  | Top -> prerr_string "⊤"
+  | Const c -> prerr_string (CL.Printpat.pretty_const c)
+  | Fn (p, list) ->
+    prerr_string "<";
+    print_param p;
+    prerr_string "-> [";
+    List.iter
+      (fun e ->
+        print_expr e;
+        prerr_string ";")
+      list;
+    prerr_string "]"
+  | Var e ->
+    prerr_string "χ (";
+    print_tagged_expr e;
+    prerr_string ")"
+  | App_V (se, list) ->
+    prerr_string "AppV (";
+    print_se se;
+    prerr_string ", [";
+    List.iter
+      (fun o ->
+        (match o with None -> prerr_string " " | Some e -> print_expr e);
+        prerr_string ";")
+      list;
+    prerr_string "]"
+  | App_P (se, list) ->
+    prerr_string "AppP (";
+    print_se se;
+    prerr_string ", [";
+    List.iter
+      (fun o ->
+        (match o with None -> prerr_string " " | Some e -> print_expr e);
+        prerr_string ";")
+      list;
+    prerr_string "]"
+  | Ctor (k, list) ->
+    prerr_string "Con (";
+    (match k with None -> prerr_string " " | Some s -> prerr_string s);
+    prerr_string ", [";
+    List.iter
+      (fun se ->
+        print_se se;
+        prerr_string ";")
+      list;
+    prerr_string "]"
+  | Fld (se, lbl) ->
+    prerr_string "Fld (";
+    print_se se;
+    prerr_string "(";
+    (match lbl with
+    | None, x ->
+      prerr_string " , ";
+      print_se x
+    | Some s, x ->
+      prerr_string s;
+      prerr_string ", ";
+      print_se x);
+    prerr_string "))"
+  | Arith (op, xs) ->
+    Printf.eprintf "( %s ) " (string_of_arithop op);
+    print_ses xs
+  | Rel (rel, xs) ->
+    Printf.eprintf "( %s ) " (string_of_relop rel);
+    print_ses xs
+  | Union (x, y) ->
+    prerr_string "(";
+    print_se x;
+    prerr_string ")∪(";
+    print_se y;
+    prerr_string ")"
+  | Inter (x, y) ->
+    prerr_string "(";
+    print_se x;
+    prerr_string ")∩(";
+    print_se y;
+    prerr_string ")"
+  | Diff (x, y) ->
+    prerr_string "(";
+    print_se x;
+    prerr_string ")-(";
+    print_se y;
+    prerr_string ")"
+  | Cond (x, y) ->
+    prerr_string "if (";
+    print_se x;
+    prerr_string ")=∅ then (";
+    print_se y;
+    prerr_string ") else ∅"
+
+and print_ses (xs : unit se list) =
+  prerr_string "[";
+  List.iter print_se xs;
+  prerr_string "]"
+
 module Param = struct
   type t = param
 
@@ -108,9 +266,38 @@ module Globalenv = Map.Make (Param)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
-let globalenv : code_loc tagged_expr Globalenv.t ref = ref Globalenv.empty
-let var_to_se : unit se CL.Ident.Tbl.t = CL.Ident.Tbl.create 256
-let undetermined_var : unit se CL.Ident.Tbl.t = CL.Ident.Tbl.create 64
+
+type env_map = code_loc tagged_expr Globalenv.t
+
+let show_env_map (env_map : env_map) =
+  Globalenv.iter
+    (fun param loc_tagged_expr ->
+      prerr_string "Globalenv :\n param = ";
+      print_param param;
+      prerr_string "\n code_loc tagged_expr = ";
+      print_tagged_expr loc_tagged_expr;
+      prerr_newline ())
+    env_map
+
+type globalenv = env_map ref
+
+let globalenv : globalenv = ref Globalenv.empty
+
+type var_se_tbl = unit se CL.Ident.Tbl.t
+
+let show_var_se_tbl (var_to_se : var_se_tbl) =
+  CL.Ident.(
+    Tbl.iter
+      (fun x se ->
+        prerr_string "var_to_se :\n ident = ";
+        prerr_string (unique_name x);
+        prerr_string "\n se = ";
+        print_se se;
+        prerr_newline ())
+      var_to_se)
+
+let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
+let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
 let rec string_of_longident li =
@@ -120,6 +307,21 @@ let rec string_of_longident li =
   | CL.Longident.Lapply (l1, l2) ->
     (* applicative functor : see ocamlc -help | grep app-funct *)
     string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
+
+let string_of_typ : CL.Types.type_desc -> string = function
+  | Tvar _ -> "var"
+  | Tarrow _ -> "function"
+  | Ttuple _ -> "tuple"
+  | Tconstr _ -> "construct"
+  | Tobject _ -> "object"
+  | Tfield _ -> "field"
+  | Tnil -> "nil"
+  | Tlink _ -> "link"
+  | Tsubst _ -> "subst"
+  | Tvariant _ -> "variant"
+  | Tunivar _ -> "univar"
+  | Tpoly _ -> "poly"
+  | Tpackage _ -> "package"
 
 let isApply : CL.Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%apply"}} -> true
@@ -178,24 +380,29 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
 #else
   | Texp_match (exp, cases, _) ->
     let p, g = List.split @@ List.map extract cases in
-    let o =  List.map Typedtree.split_pattern p in
-    let rec filter o g = match o with
-      | (Some v, Some e) :: o' -> (match g with
+    let o = List.map Typedtree.split_pattern p in
+    let rec filter o g =
+      match o with
+      | (Some v, Some e) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v :: v_p, b :: v_g, e :: e_p, b :: e_g)
         | _ -> assert false)
-      | (Some v, None) :: o' -> (match g with
+      | (Some v, None) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v :: v_p, b :: v_g, e_p, e_g)
         | _ -> assert false)
-      | (None, Some e) :: o' -> (match g with
+      | (None, Some e) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v_p, v_g, e :: e_p, b :: e_g)
         | _ -> assert false)
-      | (None, None) :: o' -> (match g with
+      | (None, None) :: o' -> (
+        match g with
         | b :: g' ->
           let v_p, v_g, e_p, e_g = filter o' g' in
           (v_p, v_g, e_p, e_g)
@@ -206,9 +413,11 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     let value_expr = Val (Expr exp.exp_loc) in
     let exn_expr = Packet (Expr exp.exp_loc) in
     updateGlobal value_p value_expr;
-    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g) |> ignore;
+    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g)
+    |> ignore;
     updateGlobal exn_p exn_expr;
-    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g) |> ignore
+    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g)
+    |> ignore
 #endif
   | Texp_try (exp, cases) ->
     let exn_pg = List.map extract cases in
@@ -218,6 +427,7 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
   | _ -> ()
 
+(** solves p_i = acc *)
 and solveParam (acc : unit se) (pattern, guarded) =
   if guarded then (
     solveEq pattern acc |> ignore;
@@ -233,6 +443,7 @@ and updateVar key data =
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
+(** solves p = se *)
 and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
   match p.pat_desc with
   | Tpat_any -> Top
@@ -243,72 +454,83 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
     updateVar a se;
     solveEq p se
   | Tpat_constant c -> Const c
-  | Tpat_tuple list -> solveCon None se list
+  | Tpat_tuple list -> solveCtor None se list
 #if OCAML_VERSION >= (4, 13, 0)
   | Tpat_construct ({txt}, _, list, _) ->
 #else
   | Tpat_construct ({txt}, _, list) ->
 #endif
     let constructor = string_of_longident txt in
-    solveCon (Some constructor) se list
+    solveCtor (Some constructor) se list
   | Tpat_variant (lbl, p_o, _) -> (
     let constructor = Some lbl in
     match p_o with
-    | None -> Con ((constructor, Bot), Top)
+    | None -> Ctor (constructor, [Top]) (* hash of the variant name *)
     | Some p ->
       let sub = solveEq p (Fld (se, (constructor, se_of_int 1))) in
-      Con ((constructor, se_of_int 1), sub))
+      Ctor (constructor, [Top; sub]))
   | Tpat_record (key_val_list, _) ->
     let list =
       List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
     in
-    solveRec se list
-  | Tpat_array list -> solveCon None se list
+    let lbl_all = (match key_val_list with
+      | (_, {CL.Types.lbl_all = l}, _) :: _ -> l
+      | _ -> failwith "NO!!") in
+    let len = Array.length lbl_all in
+    solveRec len se list
+  | Tpat_array list -> solveCtor None se list
   | Tpat_lazy p -> solveEq p (App_V (se, []))
   | Tpat_or (lhs, rhs, _) -> Union (solveEq lhs se, solveEq rhs se)
 
-and solveCon constructor se list =
+and solveCtor constructor se list =
   let l = ref list in
+  let args = ref [] in
   let i = ref 0 in
-  let s = ref (Con ((constructor, Bot), Top)) in
   while !l != [] do
     (match !l with
     | hd :: tl ->
       let ith_se = solveEq hd (Fld (se, (constructor, se_of_int !i))) in
-      let s' = Con ((constructor, se_of_int !i), ith_se) in
-      if !i = 0 then s := s' else s := Inter (!s, s');
+      args := ith_se :: !args;
       l := tl
     | _ -> assert false);
     i := !i + 1
   done;
-  !s
+  Ctor (constructor, List.rev !args)
 
-and solveRec se list =
+and solveRec len se list =
   let l = ref list in
-  let s = ref Top in
+  let args = ref [] in
+  let cursor = ref 0 in
   while !l != [] do
     match !l with
     | hd :: tl ->
       let i, p = hd in
       let ith_se = solveEq p (Fld (se, (None, se_of_int i))) in
-      let s' = Con ((None, se_of_int i), ith_se) in
-      if !s = Top then s := s' else s := Inter (!s, s');
+      while !cursor < i do
+        args := Top :: !args;
+        cursor := !cursor + 1
+      done;
+      args := ith_se :: !args;
       l := tl
     | _ -> assert false
   done;
-  !s
+  while !cursor < len do
+    args := Top :: !args;
+    cursor := !cursor + 1
+  done;
+  Ctor (None, List.rev !args)
 
-let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit = function
+let rec generateSC : rule -> CL.Typedtree.expression_desc -> unit = function
   | `APP -> (
     function
     | Texp_apply ({exp_desc = Texp_ident (_, _, atat)}, [(_, Some fn); arg])
       when (* f @@ x *)
            atat |> isApply ->
-      generateCon `APP (Texp_apply (fn, [arg]))
+      generateSC `APP (Texp_apply (fn, [arg]))
     | Texp_apply ({exp_desc = Texp_ident (_, _, atat)}, [arg; (_, Some fn)])
       when (* x |> f *)
            atat |> isRevapply ->
-      generateCon `APP (Texp_apply (fn, [arg]))
+      generateSC `APP (Texp_apply (fn, [arg]))
     | Texp_apply (fn, arg) -> ()
     | Texp_lazy e -> ()
     | _ -> failwith "Tried to apply APP rule for the wrong expression!")
@@ -317,8 +539,12 @@ let rec generateCon : rule -> CL.Typedtree.expression_desc -> unit = function
     function Texp_apply (a, b) -> () | _ -> ())
   | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun e -> ()
 
-let rec augmentCon : unit se -> env se = function _ -> Top
+let rec augmentSC : unit se -> env se = function _ -> Top
 let posToString = Common.posToString
+
+let print_sc_info () =
+  show_env_map !globalenv;
+  show_var_se_tbl var_to_se
 
 module LocSet = Common.LocSet
 
@@ -381,6 +607,14 @@ module Values = struct
     currentFileTable := Hashtbl.create 15;
     Hashtbl.replace valueBindingsTable !Common.currentModule !currentFileTable
 end
+
+(* module SetConstraintEvent = struct
+     type t = {
+       globalEnv : globalenv;
+       var_to_se : unit se CL.Ident.Tbl.t;
+       loc : CL.Location.t
+     } [@@derving show]
+   end *)
 
 module Event = struct
   type kind =
@@ -488,6 +722,7 @@ end
 
 module Checks = struct
   type check = {
+    (* scEvents : SetConstraintEvent.t list; *)
     events : Event.t list;
     loc : CL.Location.t;
     locFull : CL.Location.t;
@@ -591,6 +826,11 @@ let traverseAst () =
     let isDoesNoRaise = expr.exp_attributes |> doesNotRaise in
     let oldEvents = !currentEvents in
     if isDoesNoRaise then currentEvents := [];
+
+    (* Generate SCs  *)
+    updateEnv expr.exp_desc;
+    if !Common.Cli.debug then print_sc_info ();
+
     (match expr.exp_desc with
     | Texp_ident (callee_, _, val_desc) ->
       let callee =

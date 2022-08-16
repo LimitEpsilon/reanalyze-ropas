@@ -12,6 +12,7 @@ module Longident = Longident
 module Misc = Misc
 module Parsetree = Parsetree
 module Path = Path
+module Printpat = Printpat
 module Tast_mapper = Tast_mapper
 module Typedtree = Typedtree
 module Types = Types
