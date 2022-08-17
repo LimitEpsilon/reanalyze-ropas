@@ -171,7 +171,7 @@ let rec print_se : unit se -> unit = function
       list;
     prerr_string "]"
   | Var e ->
-    prerr_string "χ (";
+    prerr_string "X (";
     print_tagged_expr e;
     prerr_string ")"
   | App_V (se, list) ->
@@ -203,11 +203,12 @@ let rec print_se : unit se -> unit = function
         print_se se;
         prerr_string ";")
       list;
-    prerr_string "]"
+    prerr_string "]";
+    prerr_string ")"
   | Fld (se, lbl) ->
     prerr_string "Fld (";
     print_se se;
-    prerr_string "(";
+    prerr_string ", (";
     (match lbl with
     | None, x ->
       prerr_string " , ";
@@ -357,10 +358,11 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
       updateGlobal [pattern] expr
     in
     List.fold_left value_bind () list
-  | Texp_function {cases} ->
+  | Texp_function {param; cases} ->
     let value_pg = List.map extract cases in
     let value_p, _ = List.split value_pg in
     let value_expr = Val (Expr_var value_p) in
+    (if !Common.Cli.debug then prerr_endline (CL.Ident.unique_name param) else ());
     List.fold_left solveParam (Var value_expr) value_pg |> ignore
 #if OCAML_VERSION < (4, 08, 0)
   | Texp_match (exp, cases, exn_cases, _) ->
@@ -508,6 +510,7 @@ and solveRec len se list =
         cursor := !cursor + 1
       done;
       args := ith_se :: !args;
+      cursor := !cursor + 1;
       l := tl
     | _ -> assert false
   done;
