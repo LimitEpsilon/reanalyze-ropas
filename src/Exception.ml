@@ -52,14 +52,14 @@ and relop =
 
 (* set expression type *)
 and _ se =
-  | Bot : 'a se (* empty set *)
-  | Top : 'a se (* _ *)
-  | Const : CL.Asttypes.constant -> 'a se
+  | Bot : _ se (* empty set *)
+  | Top : _ se (* _ *)
+  | Const : CL.Asttypes.constant -> _ se
   | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Closure :
       param * code_loc expr list * env
       -> env se (* lambda (p->e)+ / lazy when param = nil *)
-  | Var : 'a tagged_expr -> unit se (* set variable, context-insensitive *)
+  | Var : _ tagged_expr -> unit se (* set variable, context-insensitive *)
   | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
   | App_V : 'a se * arg -> 'a se (* possible values / force when arg = nil *)
   | App_P :
@@ -131,8 +131,7 @@ let print_param par =
   List.iter print_pattern par;
   prerr_string "]"
 
-let print_expr (type k) (e : k expr) =
-  match e with
+let print_expr : type k. k expr -> unit = function
   | Expr_var p ->
     prerr_string "Expr_var (";
     print_param p;
@@ -147,8 +146,7 @@ let print_expr (type k) (e : k expr) =
     prerr_string s;
     prerr_string ")"
 
-let print_tagged_expr (type k) (e : k tagged_expr) =
-  match e with
+let print_tagged_expr : type k. k tagged_expr -> unit = function
   | Val v ->
     prerr_string "Val (";
     print_expr v;
@@ -158,8 +156,7 @@ let print_tagged_expr (type k) (e : k tagged_expr) =
     print_expr p;
     prerr_string ")"
 
-let rec print_se (se : unit se) =
-  match se with
+let rec print_se : unit se -> unit = function
   | Bot -> prerr_string "⊥"
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
@@ -263,6 +260,7 @@ module Param = struct
 end
 
 module Globalenv = Map.Make (Param)
+(** Map chosen to avoid excessive hash collisions due to Param *)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
@@ -300,8 +298,7 @@ let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
 let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
-let rec string_of_longident li =
-  match li with
+let rec string_of_longident : CL.Longident.t -> string = function
   | CL.Longident.Lident s -> s
   | CL.Longident.Ldot (li, s) -> string_of_longident li ^ "." ^ s
   | CL.Longident.Lapply (l1, l2) ->
@@ -350,12 +347,12 @@ let extract c =
   let guard = c.CL.Typedtree.c_guard in
   match guard with None -> (lhs, false) | _ -> (lhs, true)
 
-(* add bindings to globalenv when new pattern is introduced *)
+(** add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | Texp_let (_, list, _) ->
-    let value_bind acc binding =
-      let pattern = binding.CL.Typedtree.vb_pat in
-      let expr = Val (Expr binding.CL.Typedtree.vb_expr.exp_loc) in
+    let value_bind acc (binding: CL.Typedtree.value_binding) =
+      let pattern = binding.vb_pat in
+      let expr = Val (Expr binding.vb_expr.exp_loc) in
       solveEq pattern (Var expr) |> ignore;
       updateGlobal [pattern] expr
     in
@@ -427,7 +424,7 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
   | _ -> ()
 
-(** solves p_i = acc *)
+(** solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
 and solveParam (acc : unit se) (pattern, guarded) =
   if guarded then (
     solveEq pattern acc |> ignore;
@@ -443,7 +440,7 @@ and updateVar key data =
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
-(** solves p = se *)
+(** solves p = se and returns the set expression for p *)
 and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
   match p.pat_desc with
   | Tpat_any -> Top
