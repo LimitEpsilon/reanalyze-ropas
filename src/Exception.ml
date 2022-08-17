@@ -298,7 +298,7 @@ let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
 let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
-let rec string_of_longident : Longident.t -> string = function
+let rec string_of_longident : CL.Longident.t -> string = function
   | CL.Longident.Lident s -> s
   | CL.Longident.Ldot (li, s) -> string_of_longident li ^ "." ^ s
   | CL.Longident.Lapply (l1, l2) ->
