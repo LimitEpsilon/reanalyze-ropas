@@ -342,7 +342,7 @@ let isRaise : CL.Types.value_description -> bool =
 
 let updateGlobal key data = globalenv := Globalenv.add key data !globalenv
 
-let extract (c: 'a Typedtree.case) =
+let extract (c: 'a CL.Typedtree.case) =
   let lhs = c.c_lhs in
   let guard = c.c_guard in
   match guard with None -> (lhs, false) | _ -> (lhs, true)
@@ -350,7 +350,7 @@ let extract (c: 'a Typedtree.case) =
 (** add bindings to globalenv when new pattern is introduced *)
 let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | Texp_let (_, list, _) ->
-    let value_bind acc (binding: Typedtree.value_binding) =
+    let value_bind acc (binding: CL.Typedtree.value_binding) =
       let pattern = binding.vb_pat in
       let expr = Val (Expr binding.vb_expr.exp_loc) in
       solveEq pattern (Var expr) |> ignore;
