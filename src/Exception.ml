@@ -342,9 +342,9 @@ let isRaise : CL.Types.value_description -> bool =
 
 let updateGlobal key data = globalenv := Globalenv.add key data !globalenv
 
-let extract (c: 'a CL.Typedtree.case) =
-  let lhs = c.c_lhs in
-  let guard = c.c_guard in
+let extract c =
+  let lhs = c.CL.Typedtree.c_lhs in
+  let guard = c.CL.Typedtree.c_guard in
   match guard with None -> (lhs, false) | _ -> (lhs, true)
 
 (** add bindings to globalenv when new pattern is introduced *)
