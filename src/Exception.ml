@@ -254,22 +254,21 @@ and print_ses (xs : unit se list) =
   List.iter print_se xs;
   prerr_string "]"
 
-module Param = struct
-  type t = param
+module SE = struct
+  type t = unit se
 
   let compare = compare
 end
 
-module Globalenv = Map.Make (Param)
-(** Map chosen to avoid excessive hash collisions due to Param *)
+module SESet = Set.Make(SE)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
 
-type env_map = code_loc tagged_expr Globalenv.t
+type globalenv = (param, code_loc tagged_expr) Hashtbl.t
 
-let show_env_map (env_map : env_map) =
-  Globalenv.iter
+let show_env_map (env_map : globalenv) =
+  Hashtbl.iter
     (fun param loc_tagged_expr ->
       prerr_string "Globalenv :\n param = ";
       print_param param;
@@ -278,11 +277,25 @@ let show_env_map (env_map : env_map) =
       prerr_newline ())
     env_map
 
-type globalenv = env_map ref
+let globalenv : globalenv = Hashtbl.create 256
 
-let globalenv : globalenv = ref Globalenv.empty
+type var_se_tbl = SESet.t CL.Ident.Tbl.t
 
-type var_se_tbl = unit se CL.Ident.Tbl.t
+let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
+
+let union_of_list l =
+  let make_union acc se =
+    if acc = Bot
+    then se
+    else Union (se, acc)
+  in
+  List.fold_left make_union Bot l
+
+let se_of_var x =
+  let se_list =
+    try SESet.elements (CL.Ident.Tbl.find var_to_se x) with | _ -> []
+  in
+  union_of_list se_list
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   CL.Ident.(
@@ -291,11 +304,12 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
         prerr_string "var_to_se :\n ident = ";
         prerr_string (unique_name x);
         prerr_string "\n se = ";
-        print_se se;
+        let se_list = SESet.elements se in
+        print_se (union_of_list se_list);
         prerr_newline ())
       var_to_se)
 
-let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
+
 let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
@@ -341,7 +355,7 @@ let decode : CL.Types.value_description -> rule = function
 let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
-let updateGlobal key data = globalenv := Globalenv.add key data !globalenv
+let updateGlobal key data = Hashtbl.add globalenv key data
 
 let extract c =
   let lhs = c.CL.Typedtree.c_lhs in
@@ -434,11 +448,13 @@ and solveParam (acc : unit se) (pattern, guarded) =
   else Diff (acc, solveEq pattern acc)
 
 and updateVar key data =
+  let singleton = SESet.singleton data in
   if CL.Ident.Tbl.mem var_to_se key then (
     let original = CL.Ident.Tbl.find var_to_se key in
-    CL.Ident.Tbl.remove var_to_se key;
-    CL.Ident.Tbl.add var_to_se key (Union (data, original)))
-  else CL.Ident.Tbl.add var_to_se key data
+      CL.Ident.Tbl.remove var_to_se key;
+      CL.Ident.Tbl.add var_to_se key (SESet.union original singleton)
+  ) else
+    CL.Ident.Tbl.add var_to_se key singleton
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
@@ -543,7 +559,7 @@ let rec augmentSC : unit se -> env se = function _ -> Top
 let posToString = Common.posToString
 
 let print_sc_info () =
-  show_env_map !globalenv;
+  show_env_map globalenv;
   show_var_se_tbl var_to_se
 
 module LocSet = Common.LocSet
