@@ -355,7 +355,10 @@ let decode : CL.Types.value_description -> rule = function
 let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
-let updateGlobal key data = Hashtbl.add globalenv key data
+let updateGlobal key data =
+  if key = [] (* empty exn_case or val_case *)
+  then ()
+  else Hashtbl.add globalenv key data
 
 let extract c =
   let lhs = c.CL.Typedtree.c_lhs in
@@ -372,11 +375,10 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
       updateGlobal [pattern] expr
     in
     List.fold_left value_bind () list
-  | Texp_function {param; cases} ->
+  | Texp_function {cases} ->
     let value_pg = List.map extract cases in
     let value_p, _ = List.split value_pg in
     let value_expr = Val (Expr_var value_p) in
-    (if !Common.Cli.debug then prerr_endline (CL.Ident.unique_name param) else ());
     List.fold_left solveParam (Var value_expr) value_pg |> ignore
 #if OCAML_VERSION < (4, 08, 0)
   | Texp_match (exp, cases, exn_cases, _) ->
