@@ -55,6 +55,7 @@ and _ se =
   | Bot : _ se (* empty set *)
   | Top : _ se (* _ *)
   | Const : CL.Asttypes.constant -> _ se
+  | Mem : int -> _ se (* memory location, +\alpha to constructors *)
   | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Closure :
       param * code_loc expr list * env
@@ -78,7 +79,6 @@ and _ se =
 (* divide_by_zero : check denominator, if constant check if zero.          *)
 (*                : if identifier look up in var_to_se to check if constant*)
 (*                : if constant check if zero, else mark might_raise       *)
-
 and rule =
   [ `APP
   | `FORCE
@@ -127,6 +127,13 @@ let string_of_relop : relop -> string = function
   | `GT -> ">"
   | `GE -> ">="
 
+let address = ref 0
+
+let new_memory () : 'a se=
+  let mem = Mem !address in
+  address := !address + 1;
+  mem
+
 let print_param par =
   prerr_string "[";
   let print_pattern pat =
@@ -165,6 +172,7 @@ let rec print_se : unit se -> unit = function
   | Bot -> prerr_string "⊥"
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
+  | Mem n -> prerr_string "(Mem "; prerr_int n; prerr_string ")"
   | Fn (p, list) ->
     prerr_string "<";
     print_param p;
@@ -270,7 +278,7 @@ module SE = struct
   let compare = compare
 end
 
-module SESet = Set.Make(SE)
+module SESet = Set.Make (SE)
 
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
@@ -295,15 +303,23 @@ let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
 
 let union_of_list l =
   let make_union acc se =
-    if acc = Bot
-    then se
-    else Union (se, acc)
+    match acc with
+    | Bot -> se
+    | _ -> (match se with Bot -> acc | _ -> Union (acc, se))
   in
   List.fold_left make_union Bot l
 
+let or_of_list l =
+  let make_or acc se =
+    match acc with
+    | Bot -> se
+    | _ -> (match se with Bot -> acc | _ -> Or (acc, se))
+  in
+  List.fold_left make_or Bot l
+
 let se_of_var x =
   let se_list =
-    try SESet.elements (CL.Ident.Tbl.find var_to_se x) with | _ -> []
+    try SESet.elements (CL.Ident.Tbl.find var_to_se x) with _ -> []
   in
   union_of_list se_list
 
@@ -318,7 +334,6 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
         print_se (union_of_list se_list);
         prerr_newline ())
       var_to_se)
-
 
 let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 

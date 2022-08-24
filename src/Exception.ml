@@ -204,6 +204,10 @@ let value_bind (binding: CL.Typedtree.value_binding) =
 let update_sc se1 se2 =
   Hashtbl.add insensitive_sc se1 se2
 
+let val_of_loc loc = Var (Val (Expr loc))
+
+let packet_of_loc loc = Var (Packet (Expr loc))
+
 let rec generateSC : rule -> CL.Typedtree.expression -> unit = function
   | `APP -> (fun expr -> match expr.exp_desc with
     | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
@@ -213,21 +217,44 @@ let rec generateSC : rule -> CL.Typedtree.expression -> unit = function
     | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
       when (* x |> f *)
            val_desc |> isRevapply ->
-      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}
+      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}    
+    | Texp_apply ({exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = "%lazy_force"}})}, _) ->
+      generateSC `FORCE expr
     | Texp_apply (fn, arg) -> (
-      let val_se = Var (Val (Expr expr.exp_loc)) in
-      let packet_se = Var (Packet (Expr expr.exp_loc)) in
-      let fn_se = Var (Val (Expr fn.exp_loc)) in
+      let val_se = val_of_loc expr.exp_loc in
+      let packet_se = packet_of_loc expr.exp_loc in
+      let fn_val = val_of_loc fn.exp_loc in
       let args = List.map 
-        (fun (_, o) -> (match o with | Some e -> Some (Expr e.CL.Typedtree.exp_loc) | _ -> None))
+        (fun (_, o) -> (match o with 
+        | Some e -> Some (Expr e.CL.Typedtree.exp_loc) 
+        | _ -> None))
         arg
       in
-      update_sc val_se (App_V (fn_se, args));
-      update_sc packet_se (App_P (fn_se, args))
-    )
-    | Texp_lazy _ -> ()
+      let arg_packet = List.map
+        (fun (_, o) -> (match o with 
+        | Some e -> packet_of_loc e.CL.Typedtree.exp_loc
+        | _ -> Bot))
+        arg
+      in
+      update_sc val_se (App_V (fn_val, args));
+      update_sc packet_se (or_of_list ((App_P (fn_val, args)) :: arg_packet)))
     | _ -> failwith "Tried to apply APP rule for the wrong expression!")
-  | `FORCE | `IGNORE | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
+  | `FORCE -> (fun expr -> match expr.exp_desc with
+    | Texp_apply (_, [(_, Some laz)]) -> 
+      let loc = expr.exp_loc in
+      let val_se = val_of_loc loc in
+      let packet_se = packet_of_loc loc in
+      let laz_se = val_of_loc laz.exp_loc in
+      update_sc val_se (App_V (laz_se, []));
+      update_sc packet_se (App_P (laz_se, []))
+    | _ -> failwith "Lazy.force without %lazy.force?")
+  | `IGNORE -> (fun expr -> match expr.exp_desc with
+    | Texp_apply (_, [(_, Some e)]) ->
+      let packet_se = packet_of_loc expr.exp_loc in
+      let sub_packet = packet_of_loc e.exp_loc in
+      update_sc packet_se sub_packet
+    | _ -> failwith "ignore with more than one argument?")
+  | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
   | `OP | `CON | `FIELD | `SETFIELD -> (fun expr -> match expr.exp_desc with
     Texp_apply (_, _) -> () | _ -> ())
   | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun _ -> ()
