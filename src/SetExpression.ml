@@ -66,6 +66,7 @@ and _ se =
   | Top : _ se (* _ *)
   | Const : CL.Asttypes.constant -> _ se
   | Mem : int -> _ se (* memory location, +\alpha to constructors *)
+  | Prim : string -> _ se (* primitives, later converted to arith/rel/fld/mem *)
   | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Closure :
       param * code_loc expr list * env
@@ -83,7 +84,7 @@ and _ se =
   | Union : 'a se * 'a se -> 'a se (* union *)
   | Inter : 'a se * 'a se -> 'a se (* intersection *)
   | Diff : 'a se * 'a se -> 'a se (* difference *)
-  | Or : 'a se * 'a se -> 'a se (* A|B : A or B, but not both. *)
+  | Or : 'a se list -> 'a se (* A|B : A or B, but not both. *)
   | Cond : 'a se * 'a se -> 'a se (* conditional set expression *)
 
 (* divide_by_zero : check denominator, if constant check if zero.          *)
@@ -261,12 +262,13 @@ let rec print_se : unit se -> unit = function
     prerr_string ")∩(";
     print_se y;
     prerr_string ")"
-  | Or (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")|(";
-    print_se y;
-    prerr_string ")"
+  | Or l ->
+    let l' = ref l in
+    while !l' != [] do
+      match !l' with
+      | hd :: tl -> (prerr_string "("; print_se hd; prerr_string ")"; if tl != [] then prerr_string "|"; l' := tl)
+      | _ -> assert false
+    done
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
@@ -322,19 +324,11 @@ let union_of_list l =
   in
   List.fold_left make_union Bot l
 
-let or_of_list l =
-  let make_or acc se =
-    match acc with
-    | Bot -> se
-    | _ -> (match se with Bot -> acc | _ -> Or (acc, se))
-  in
-  List.fold_left make_or Bot l
-
 let se_of_var x =
   let se_list =
     try SESet.elements (CL.Ident.Tbl.find var_to_se x) with _ -> []
   in
-  or_of_list se_list
+  Or se_list
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   CL.Ident.(
