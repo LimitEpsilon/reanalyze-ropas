@@ -17,8 +17,10 @@ let decode : CL.Types.value_description -> rule = function
   | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
   | _ -> `APP
 
-let isRaise : CL.Types.value_description -> bool =
- fun v -> match decode v with `RAISE -> true | _ -> false
+let isRaise : CL.Types.value_description -> bool = function
+  | {val_kind = Val_prim {prim_name = "%raise" | "%raise_notrace" | "%reraise" | "%raise_with_backtrace"}} -> true
+    (* do not consider second argument for raise_with_backtrace *)
+  | _ -> false
 
 let updateGlobal key data =
   if key = [] (* empty exn_case or val_case *)
@@ -208,22 +210,28 @@ let val_of_loc loc = Var (Val (Expr loc))
 
 let packet_of_loc loc = Var (Packet (Expr loc))
 
-let rec generateSC : rule -> CL.Typedtree.expression -> unit = function
-  | `APP -> (fun expr -> match expr.exp_desc with
+let rec generateSC : CL.Typedtree.expression -> unit = fun expr ->
+  let val_se = val_of_loc expr.exp_loc in
+  let packet_se = packet_of_loc expr.exp_loc in
+  match expr.exp_desc with
     | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
       when (* f @@ x *)
            val_desc |> isApply ->
-      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}
+      generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
     | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
       when (* x |> f *)
            val_desc |> isRevapply ->
-      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}    
-    | Texp_apply ({exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = "%lazy_force"}})}, _) ->
-      generateSC `FORCE expr
+      generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
+    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some e); _])
+      when (* raise e *)
+           val_desc |> isRaise ->
+      update_sc val_se Bot;
+      update_sc packet_se (val_of_loc e.exp_loc)
     | Texp_apply (fn, arg) -> (
-      let val_se = val_of_loc expr.exp_loc in
-      let packet_se = packet_of_loc expr.exp_loc in
-      let fn_val = val_of_loc fn.exp_loc in
+      let fn_val = (match fn with
+        | {exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = prim}})} ->
+          Prim prim
+        | _ -> val_of_loc fn.exp_loc) in
       let args = List.map 
         (fun (_, o) -> (match o with 
         | Some e -> Some (Expr e.CL.Typedtree.exp_loc) 
@@ -238,26 +246,7 @@ let rec generateSC : rule -> CL.Typedtree.expression -> unit = function
       in
       update_sc val_se (App_V (fn_val, args));
       update_sc packet_se (or_of_list ((App_P (fn_val, args)) :: arg_packet)))
-    | _ -> failwith "Tried to apply APP rule for the wrong expression!")
-  | `FORCE -> (fun expr -> match expr.exp_desc with
-    | Texp_apply (_, [(_, Some laz)]) -> 
-      let loc = expr.exp_loc in
-      let val_se = val_of_loc loc in
-      let packet_se = packet_of_loc loc in
-      let laz_se = val_of_loc laz.exp_loc in
-      update_sc val_se (App_V (laz_se, []));
-      update_sc packet_se (App_P (laz_se, []))
-    | _ -> failwith "Lazy.force without %lazy.force?")
-  | `IGNORE -> (fun expr -> match expr.exp_desc with
-    | Texp_apply (_, [(_, Some e)]) ->
-      let packet_se = packet_of_loc expr.exp_loc in
-      let sub_packet = packet_of_loc e.exp_loc in
-      update_sc packet_se sub_packet
-    | _ -> failwith "ignore with more than one argument?")
-  | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
-  | `OP | `CON | `FIELD | `SETFIELD -> (fun expr -> match expr.exp_desc with
-    Texp_apply (_, _) -> () | _ -> ())
-  | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun _ -> ()
+    | Texp_array _ | Texp_assert _ -> ()
 
 let (*rec*) augmentSC : unit se -> env se = function _ -> Top
 let posToString = Common.posToString
