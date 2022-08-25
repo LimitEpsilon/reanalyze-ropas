@@ -1,3 +1,5 @@
+[%%import "../config.h"]
+
 open SetExpression
 
 let isApply : CL.Types.value_description -> bool = function
@@ -18,8 +20,15 @@ let decode : CL.Types.value_description -> rule = function
   | _ -> `APP
 
 let isRaise : CL.Types.value_description -> bool = function
-  | {val_kind = Val_prim {prim_name = "%raise" | "%raise_notrace" | "%reraise" | "%raise_with_backtrace"}} -> true
-    (* do not consider second argument for raise_with_backtrace *)
+  | {
+      val_kind =
+        Val_prim
+          {
+            prim_name =
+              "%raise" | "%raise_notrace" | "%reraise" | "%raise_with_backtrace";
+          };
+    } ->
+    true (* do not consider second argument for raise_with_backtrace *)
   | _ -> false
 
 let updateGlobal key data =
@@ -39,8 +48,8 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     let value_p, _ = List.split value_pg in
     let value_expr = Val (Expr_var value_p) in
     List.fold_left solveParam (Var value_expr) value_pg |> ignore
-  | ((Texp_match (exp, cases, exn_cases, _)) [@if ocaml_version < (4, 08, 0)])
-    ->
+  | ((Texp_match (exp, cases, exn_cases, _))
+  [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let value_pg = List.map extract cases in
     let exn_pg = List.map extract exn_cases in
     let value_p, _ = List.split value_pg in
@@ -51,7 +60,8 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     List.fold_left solveParam (Var value_expr) value_pg |> ignore;
     updateGlobal exn_p exn_expr;
     List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
-  | ((Texp_match (exp, cases, _)) [@if ocaml_version >= (4, 08, 0)]) ->
+  | ((Texp_match (exp, cases, _))
+  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let p, g = List.split @@ List.map extract cases in
     let o = List.map Typedtree.split_pattern p in
     let rec filter o g =
@@ -128,10 +138,12 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
     solveEq p se
   | Tpat_constant c -> Const c
   | Tpat_tuple list -> solveCtor None se list
-  | ((Tpat_construct ({txt}, _, list, _)) [@if ocaml_version >= (4, 13, 0)]) ->
+  | ((Tpat_construct ({txt}, _, list, _))
+  [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
     let constructor = string_of_longident txt in
     solveCtor (Some constructor) se list
-  | ((Tpat_construct ({txt}, _, list)) [@if ocaml_version < (4, 13, 0)]) ->
+  | ((Tpat_construct ({txt}, _, list))
+  [@if ocaml_version < (4, 13, 0) || defined npm]) ->
     let constructor = string_of_longident txt in
     solveCtor (Some constructor) se list
   | Tpat_variant (lbl, p_o, _) -> (
@@ -205,43 +217,51 @@ let update_sc se1 se2 = Hashtbl.add insensitive_sc se1 se2
 let val_of_loc loc = Var (Val (Expr loc))
 let packet_of_loc loc = Var (Packet (Expr loc))
 
-let rec generateSC : CL.Typedtree.expression -> unit = fun expr ->
+let rec generateSC : CL.Typedtree.expression -> unit =
+ fun expr ->
   let val_se = val_of_loc expr.exp_loc in
   let packet_se = packet_of_loc expr.exp_loc in
   match expr.exp_desc with
-    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
-      when (* f @@ x *)
-           val_desc |> isApply ->
-      generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
-    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
-      when (* x |> f *)
-           val_desc |> isRevapply ->
-      generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
-    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some e); _])
-      when (* raise e *)
-           val_desc |> isRaise ->
-      update_sc val_se Bot;
-      update_sc packet_se (val_of_loc e.exp_loc)
-    | Texp_apply (fn, arg) -> (
-      let fn_val = (match fn with
-        | {exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = prim}})} ->
-          Prim prim
-        | _ -> val_of_loc fn.exp_loc) in
-      let args = List.map 
-        (fun (_, o) -> (match o with 
-        | Some e -> Some (Expr e.CL.Typedtree.exp_loc) 
-        | _ -> None))
+  | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
+    when (* f @@ x *)
+         val_desc |> isApply ->
+    generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
+  | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
+    when (* x |> f *)
+         val_desc |> isRevapply ->
+    generateSC {expr with exp_desc = Texp_apply (fn, [arg])}
+  | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some e); _])
+    when (* raise e *)
+         val_desc |> isRaise ->
+    update_sc val_se Bot;
+    update_sc packet_se (val_of_loc e.exp_loc)
+  | Texp_apply (fn, arg) ->
+    let fn_val =
+      match fn with
+      | {exp_desc = Texp_ident (_, _, {val_kind = Val_prim {prim_name = prim}})}
+        ->
+        Prim prim
+      | _ -> val_of_loc fn.exp_loc
+    in
+    let args =
+      List.map
+        (fun (_, o) ->
+          match o with
+          | Some e -> Some (Expr e.CL.Typedtree.exp_loc)
+          | _ -> None)
         arg
-      in
-      let arg_packet = List.map
-        (fun (_, o) -> (match o with 
-        | Some e -> packet_of_loc e.CL.Typedtree.exp_loc
-        | _ -> Bot))
+    in
+    let arg_packet =
+      List.map
+        (fun (_, o) ->
+          match o with
+          | Some e -> packet_of_loc e.CL.Typedtree.exp_loc
+          | _ -> Bot)
         arg
-      in
-      update_sc val_se (App_V (fn_val, args));
-      update_sc packet_se (Or ((App_P (fn_val, args)) :: arg_packet)))
-    | Texp_array _ | Texp_assert _ -> ()
+    in
+    update_sc val_se (App_V (fn_val, args));
+    update_sc packet_se (Or (App_P (fn_val, args) :: arg_packet))
+  | Texp_array _ | Texp_assert _ -> ()
 
 let augmentSC : unit se -> env se = (*rec*) function _ -> Top
 let posToString = Common.posToString

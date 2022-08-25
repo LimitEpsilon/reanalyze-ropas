@@ -1,7 +1,7 @@
 (* Compiler libs: use the host compiler libs except on 4.06 use vendored ones.
    This allows to target 4.06 on any compiler by overriding OCAML_VERSION. *)
-
-[%%if ocaml_version <= (4, 06, 1)]
+[%%import "../config.h"]
+[%%if ocaml_version <= (4, 06, 1) || defined npm]
 
 include Compilerlibs406
 
