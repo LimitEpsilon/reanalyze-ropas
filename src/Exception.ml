@@ -245,7 +245,7 @@ let rec generateSC : CL.Typedtree.expression -> unit = fun expr ->
         arg
       in
       update_sc val_se (App_V (fn_val, args));
-      update_sc packet_se (or_of_list ((App_P (fn_val, args)) :: arg_packet)))
+      update_sc packet_se (Or ((App_P (fn_val, args)) :: arg_packet)))
     | Texp_array _ | Texp_assert _ -> ()
 
 let (*rec*) augmentSC : unit se -> env se = function _ -> Top
