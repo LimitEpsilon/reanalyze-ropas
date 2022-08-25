@@ -21,10 +21,10 @@ let isRaise : CL.Types.value_description -> bool =
  fun v -> match decode v with `RAISE -> true | _ -> false
 
 let updateGlobal key data =
-  if key = [] (* empty exn_case or val_case *)
-  then ()
+  if key = [] (* empty exn_case or val_case *) then ()
   else Hashtbl.add globalenv key data
 
+(** determine whether or not to shadow the following cases by checking the existence of a guard *)
 let extract c =
   let lhs = c.CL.Typedtree.c_lhs in
   let guard = c.CL.Typedtree.c_guard in
@@ -37,8 +37,8 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     let value_p, _ = List.split value_pg in
     let value_expr = Val (Expr_var value_p) in
     List.fold_left solveParam (Var value_expr) value_pg |> ignore
-#if OCAML_VERSION < (4, 08, 0)
-  | Texp_match (exp, cases, exn_cases, _) ->
+  | ((Texp_match (exp, cases, exn_cases, _)) [@if ocaml_version < (4, 08, 0)])
+    ->
     let value_pg = List.map extract cases in
     let exn_pg = List.map extract exn_cases in
     let value_p, _ = List.split value_pg in
@@ -49,8 +49,7 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     List.fold_left solveParam (Var value_expr) value_pg |> ignore;
     updateGlobal exn_p exn_expr;
     List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
-#else
-  | Texp_match (exp, cases, _) ->
+  | ((Texp_match (exp, cases, _)) [@if ocaml_version >= (4, 08, 0)]) ->
     let p, g = List.split @@ List.map extract cases in
     let o = List.map Typedtree.split_pattern p in
     let rec filter o g =
@@ -90,7 +89,6 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
     updateGlobal exn_p exn_expr;
     List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g)
     |> ignore
-#endif
   | Texp_try (exp, cases) ->
     let exn_pg = List.map extract cases in
     let exn_p, _ = List.split exn_pg in
@@ -110,10 +108,9 @@ and updateVar key data =
   let singleton = SESet.singleton data in
   if CL.Ident.Tbl.mem var_to_se key then (
     let original = CL.Ident.Tbl.find var_to_se key in
-      CL.Ident.Tbl.remove var_to_se key;
-      CL.Ident.Tbl.add var_to_se key (SESet.union original singleton)
-  ) else
-    CL.Ident.Tbl.add var_to_se key singleton
+    CL.Ident.Tbl.remove var_to_se key;
+    CL.Ident.Tbl.add var_to_se key (SESet.union original singleton))
+  else CL.Ident.Tbl.add var_to_se key singleton
 
 and se_of_int n = Const (CL.Asttypes.Const_int n)
 
@@ -129,11 +126,10 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
     solveEq p se
   | Tpat_constant c -> Const c
   | Tpat_tuple list -> solveCtor None se list
-#if OCAML_VERSION >= (4, 13, 0)
-  | Tpat_construct ({txt}, _, list, _) ->
-#else
-  | Tpat_construct ({txt}, _, list) ->
-#endif
+  | ((Tpat_construct ({txt}, _, list, _)) [@if ocaml_version >= (4, 13, 0)]) ->
+    let constructor = string_of_longident txt in
+    solveCtor (Some constructor) se list
+  | ((Tpat_construct ({txt}, _, list)) [@if ocaml_version < (4, 13, 0)]) ->
     let constructor = string_of_longident txt in
     solveCtor (Some constructor) se list
   | Tpat_variant (lbl, p_o, _) -> (
@@ -147,9 +143,11 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
     let list =
       List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
     in
-    let lbl_all = (match key_val_list with
+    let lbl_all =
+      match key_val_list with
       | (_, {CL.Types.lbl_all = l}, _) :: _ -> l
-      | _ -> failwith "Tried to match a record type without any fields") in
+      | _ -> failwith "Tried to match a record type without any fields"
+    in
     let len = Array.length lbl_all in
     solveRec len se list
   | Tpat_array list -> solveCtor None se list
@@ -195,71 +193,86 @@ and solveRec len se list =
   done;
   Ctor (None, List.rev !args)
 
-let value_bind (binding: CL.Typedtree.value_binding) =
+let value_bind (binding : CL.Typedtree.value_binding) =
   let pattern = binding.vb_pat in
   let expr = Val (Expr binding.vb_expr.exp_loc) in
   solveEq pattern (Var expr) |> ignore;
   updateGlobal [pattern] expr
 
-let update_sc se1 se2 =
-  Hashtbl.add insensitive_sc se1 se2
-
+let update_sc se1 se2 = Hashtbl.add insensitive_sc se1 se2
 let val_of_loc loc = Var (Val (Expr loc))
-
 let packet_of_loc loc = Var (Packet (Expr loc))
 
 let rec generateSC : rule -> CL.Typedtree.expression -> unit = function
-  | `APP -> (fun expr -> match expr.exp_desc with
-    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
-      when (* f @@ x *)
-           val_desc |> isApply ->
-      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}
-    | Texp_apply ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
-      when (* x |> f *)
-           val_desc |> isRevapply ->
-      generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}    
-    | Texp_apply ({exp_desc = Texp_ident(_, _, {val_kind = Val_prim {prim_name = "%lazy_force"}})}, _) ->
-      generateSC `FORCE expr
-    | Texp_apply (fn, arg) -> (
-      let val_se = val_of_loc expr.exp_loc in
-      let packet_se = packet_of_loc expr.exp_loc in
-      let fn_val = val_of_loc fn.exp_loc in
-      let args = List.map 
-        (fun (_, o) -> (match o with 
-        | Some e -> Some (Expr e.CL.Typedtree.exp_loc) 
-        | _ -> None))
-        arg
-      in
-      let arg_packet = List.map
-        (fun (_, o) -> (match o with 
-        | Some e -> packet_of_loc e.CL.Typedtree.exp_loc
-        | _ -> Bot))
-        arg
-      in
-      update_sc val_se (App_V (fn_val, args));
-      update_sc packet_se (or_of_list ((App_P (fn_val, args)) :: arg_packet)))
-    | _ -> failwith "Tried to apply APP rule for the wrong expression!")
-  | `FORCE -> (fun expr -> match expr.exp_desc with
-    | Texp_apply (_, [(_, Some laz)]) -> 
-      let loc = expr.exp_loc in
-      let val_se = val_of_loc loc in
-      let packet_se = packet_of_loc loc in
-      let laz_se = val_of_loc laz.exp_loc in
-      update_sc val_se (App_V (laz_se, []));
-      update_sc packet_se (App_P (laz_se, []))
-    | _ -> failwith "Lazy.force without %lazy.force?")
-  | `IGNORE -> (fun expr -> match expr.exp_desc with
-    | Texp_apply (_, [(_, Some e)]) ->
-      let packet_se = packet_of_loc expr.exp_loc in
-      let sub_packet = packet_of_loc e.exp_loc in
-      update_sc packet_se sub_packet
-    | _ -> failwith "ignore with more than one argument?")
-  | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET
-  | `OP | `CON | `FIELD | `SETFIELD -> (fun expr -> match expr.exp_desc with
-    Texp_apply (_, _) -> () | _ -> ())
+  | `APP -> (
+    fun expr ->
+      match expr.exp_desc with
+      | Texp_apply
+          ({exp_desc = Texp_ident (_, _, val_desc)}, [(_, Some fn); arg])
+        when (* f @@ x *)
+             val_desc |> isApply ->
+        generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}
+      | Texp_apply
+          ({exp_desc = Texp_ident (_, _, val_desc)}, [arg; (_, Some fn)])
+        when (* x |> f *)
+             val_desc |> isRevapply ->
+        generateSC `APP {expr with exp_desc = Texp_apply (fn, [arg])}
+      | Texp_apply
+          ( {
+              exp_desc =
+                Texp_ident
+                  (_, _, {val_kind = Val_prim {prim_name = "%lazy_force"}});
+            },
+            _ ) ->
+        generateSC `FORCE expr
+      | Texp_apply (fn, arg) ->
+        let val_se = val_of_loc expr.exp_loc in
+        let packet_se = packet_of_loc expr.exp_loc in
+        let fn_val = val_of_loc fn.exp_loc in
+        let args =
+          List.map
+            (fun (_, o) ->
+              match o with
+              | Some e -> Some (Expr e.CL.Typedtree.exp_loc)
+              | _ -> None)
+            arg
+        in
+        let arg_packet =
+          List.map
+            (fun (_, o) ->
+              match o with
+              | Some e -> packet_of_loc e.CL.Typedtree.exp_loc
+              | _ -> Bot)
+            arg
+        in
+        update_sc val_se (App_V (fn_val, args));
+        update_sc packet_se (or_of_list (App_P (fn_val, args) :: arg_packet))
+      | _ -> failwith "Tried to apply APP rule for the wrong expression!")
+  | `FORCE -> (
+    fun expr ->
+      match expr.exp_desc with
+      | Texp_apply (_, [(_, Some laz)]) ->
+        let loc = expr.exp_loc in
+        let val_se = val_of_loc loc in
+        let packet_se = packet_of_loc loc in
+        let laz_se = val_of_loc laz.exp_loc in
+        update_sc val_se (App_V (laz_se, []));
+        update_sc packet_se (App_P (laz_se, []))
+      | _ -> failwith "Lazy.force without %lazy.force?")
+  | `IGNORE -> (
+    fun expr ->
+      match expr.exp_desc with
+      | Texp_apply (_, [(_, Some e)]) ->
+        let packet_se = packet_of_loc expr.exp_loc in
+        let sub_packet = packet_of_loc e.exp_loc in
+        update_sc packet_se sub_packet
+      | _ -> failwith "ignore with more than one argument?")
+  | `IDENTITY | `ARITH | `REL | `EXTERN | `FN | `VAR | `LET | `OP | `CON
+  | `FIELD | `SETFIELD -> (
+    fun expr -> match expr.exp_desc with Texp_apply (_, _) -> () | _ -> ())
   | `SEQ | `CASE | `HANDLE | `RAISE | `FOR | `WHILE -> fun _ -> ()
 
-let (*rec*) augmentSC : unit se -> env se = function _ -> Top
+let augmentSC : unit se -> env se = (*rec*) function _ -> Top
 let posToString = Common.posToString
 
 let print_sc_info () =
@@ -699,7 +712,8 @@ let traverseAst () =
   in
   let value_binding (self : CL.Tast_mapper.mapper)
       (vb : CL.Typedtree.value_binding) =
-    let () = value_bind vb in (* update globalenv *)
+    let () = value_bind vb in
+    (* update globalenv *)
     let oldId = !currentId in
     let oldEvents = !currentEvents in
     let isFunction =
@@ -750,7 +764,7 @@ let traverseAst () =
 let processStructure (structure : CL.Typedtree.structure) =
   let traverseAst = traverseAst () in
   structure |> traverseAst.structure traverseAst |> ignore;
-  (if !Common.Cli.debug then print_sc_info ())
+  if !Common.Cli.debug then print_sc_info ()
 
 let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   match cmt_infos.cmt_annots with
