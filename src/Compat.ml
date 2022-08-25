@@ -171,9 +171,10 @@ let getSigModuleModtype si =
     [@if ocaml_version >= (4, 08, 0)]) ->
     Some (id, moduleType, loc)
   | ((Types.Sig_module (id, {Types.md_type = moduleType; md_loc = loc}, _))
-    [@if ocaml_version < (4, 08, 0)])
+  [@if ocaml_version < (4, 08, 0)]) ->
+    Some (id, moduleType, loc)
   | ((Types.Sig_modtype (id, {Types.mtd_type = Some moduleType; mtd_loc = loc}))
-    [@if ocaml_version < (4, 08, 0)]) ->
+  [@if ocaml_version < (4, 08, 0)]) ->
     Some (id, moduleType, loc)
   | _ -> None
 
@@ -182,8 +183,8 @@ let getMtyFunctorModuleType (moduleType : Types.module_type) =
   | Mty_functor (Named (_, mtParam), mt) ->
     Some (Some mtParam, mt) [@if ocaml_version >= (4, 10, 0)]
   | Mty_functor (Unit, mt) -> Some (None, mt) [@if ocaml_version >= (4, 10, 0)]
-  | Mty_functor (_, mtParam, mt) ->
-    Some (mtParam, mt) [@if ocaml_version < (4, 10, 0)]
+  | ((Mty_functor (_, mtParam, mt)) [@if ocaml_version < (4, 10, 0)]) ->
+    Some (mtParam, mt)
   | _ -> None
 
 let getTexpMatch desc =
