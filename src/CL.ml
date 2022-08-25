@@ -1,9 +1,12 @@
 (* Compiler libs: use the host compiler libs except on 4.06 use vendored ones.
    This allows to target 4.06 on any compiler by overriding OCAML_VERSION. *)
+[%%import "../config.h"]
+[%%if ocaml_version <= (4, 06, 1) || defined npm]
 
-#if OCAML_VERSION <= (4, 06, 1)
 include Compilerlibs406
-#else
+
+[%%else]
+
 module Asttypes = Asttypes
 module Cmt_format = Cmt_format
 module Ident = Ident
@@ -16,4 +19,5 @@ module Printpat = Printpat
 module Tast_mapper = Tast_mapper
 module Typedtree = Typedtree
 module Types = Types
-#endif
+
+[%%endif]
