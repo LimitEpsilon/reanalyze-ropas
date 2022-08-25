@@ -24,31 +24,41 @@ and ctor = string option
 and 'a fld = ctor * 'a se
 
 (* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
+and arith =
+  | ADD
+  | SUB
+  | DIV
+  | MUL
+  | NEG
+  | ABS (* absolute value *)
+  | MOD
+  | AND
+  | OR
+  | NOT
+  | XOR
+  | LSL (* <<, logical *)
+  | LSR (* >>, logical *)
+  | ASR (* >>, arithmetic sign extension *)
+  | SUCC (* ++x *)
+  | PRED (* --x *)
+
+and rel =
+  | EQ (* == *)
+  | NE (* != *)
+  | LT (* < *)
+  | LE (* <= *)
+  | GT (* > *)
+  | GE (* >= *)
+
 and arithop =
-  [ `ADD
-  | `SUB
-  | `DIV
-  | `MUL
-  | `NEG
-  | `ABS (* absolute value *)
-  | `MOD
-  | `AND
-  | `OR
-  | `NOT
-  | `XOR
-  | `LSL (* <<, logical *)
-  | `LSR (* >>, logical *)
-  | `ASR (* >>, arithmetic sign extension *)
-  | `SUCC (* ++x *)
-  | `PRED (* --x *) ]
+  | INT of arith
+  | INT32 of arith
+  | INT64 of arith
+  | FLOAT of arith
+  | NATURALINT of arith
 
 and relop =
-  [ `EQ (* == *)
-  | `NE (* != *)
-  | `LT (* < *)
-  | `LE (* <= *)
-  | `GT (* > *)
-  | `GE (* >= *) ]
+  | GEN of rel
 
 (* set expression type *)
 and _ se =
@@ -102,30 +112,33 @@ and rule =
   | `WHILE ]
 
 let string_of_arithop : arithop -> string = function
-  | `ADD -> "+"
-  | `SUB -> "-"
-  | `DIV -> "÷"
-  | `MUL -> "×"
-  | `NEG -> "~-"
-  | `ABS -> "abs"
-  | `MOD -> "mod"
-  | `AND -> "&&"
-  | `OR -> "||"
-  | `NOT -> "not"
-  | `XOR -> "xor"
-  | `LSL -> "lsl"
-  | `LSR -> "lsr"
-  | `ASR -> "asr"
-  | `SUCC -> "++"
-  | `PRED -> "--"
+  INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x ->
+  match x with
+  | ADD -> "+"
+  | SUB -> "-"
+  | DIV -> "÷"
+  | MUL -> "×"
+  | NEG -> "~-"
+  | ABS -> "abs"
+  | MOD -> "mod"
+  | AND -> "&&"
+  | OR -> "||"
+  | NOT -> "not"
+  | XOR -> "xor"
+  | LSL -> "lsl"
+  | LSR -> "lsr"
+  | ASR -> "asr"
+  | SUCC -> "++"
+  | PRED -> "--"
 
-let string_of_relop : relop -> string = function
-  | `EQ -> "=="
-  | `NE -> "!="
-  | `LT -> "<"
-  | `LE -> "<="
-  | `GT -> ">"
-  | `GE -> ">="
+let string_of_relop : relop -> string = function GEN x ->
+  match x with
+  | EQ -> "=="
+  | NE -> "!="
+  | LT -> "<"
+  | LE -> "<="
+  | GT -> ">"
+  | GE -> ">="
 
 let address = ref 0
 
@@ -321,7 +334,7 @@ let se_of_var x =
   let se_list =
     try SESet.elements (CL.Ident.Tbl.find var_to_se x) with _ -> []
   in
-  union_of_list se_list
+  or_of_list se_list
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   CL.Ident.(
@@ -359,3 +372,33 @@ let string_of_typ : CL.Types.type_desc -> string = function
   | Tunivar _ -> "univar"
   | Tpoly _ -> "poly"
   | Tpackage _ -> "package"
+
+exception Not_resolvable
+
+let resolve_as_const : unit se -> CL.Asttypes.constant = function
+  | Arith (INT ADD, [x; y]) -> Const_char 'c'
+  | Arith (FLOAT ADD, [x; y]) -> Const_float "1.0"
+  | Arith (INT DIV, [x; y]) -> Const_int 1
+  | Arith (INT MUL, [x; y]) -> Const_int32 1l
+  | Arith (INT SUCC, [x]) -> Const_int64 2L
+  | Arith (INT SUB, [x; y]) -> Const_nativeint 0n
+  | Arith (INT ADD, [x; y])
+  | Arith (INT SUB, [x; y])
+  | Arith (INT DIV, [x; y])
+  | Arith (INT MUL, [x; y])
+  | Arith (INT NEG, [x; y])
+  | Arith (FLOAT ABS, [x; y]) (* absolute value *)
+  | Arith (INT MOD, [x; y])
+  | Arith (INT AND, [x; y])
+  | Arith (INT OR, [x; y])
+  | Arith (INT NOT, [x; y])
+  | Arith (INT XOR, [x; y])
+  | Arith (INT LSL, [x; y]) (* <<, logical *)
+  | Arith (INT LSR, [x; y]) (* >>, logical *)
+  | Arith (INT ASR, [x; y]) -> Const_int 1 (* >>, arithmetic sign extension *)
+  | Arith (INT SUCC, [x]) (* ++x *)
+  | Arith (INT PRED, [x]) -> Const_int 1 (* --x *)
+
+let resolve_arith : unit se -> unit se = fun e ->
+  try Const (resolve_as_const e) with
+  | Not_resolvable -> Top

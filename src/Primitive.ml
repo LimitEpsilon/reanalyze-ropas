@@ -3,13 +3,13 @@ let decode_prim = function
   | "%intoffloat" | "%floatofint" -> `IDENTITY
   | "%nativeint_of_int" | "%nativeint_to_int" -> `IDENTITY
   | "%int32_of_int" | "%int32_to_int" -> `IDENTITY
-  | "%int64_of_int" | "%int64_to_int" -> `IDENTITY
-  | "%bswap16" | "%bswap_int32" | "%bswap_int64" | "%bswap_native" | "%opaque"
-    ->
-    `IDENTITY
+  | "%int64_of_int" | "%int64_to_int" | "%opaque" -> `IDENTITY
   | "%nativeint_of_int32" | "%nativeint_to_int32" | "%int64_of_int32"
   | "%int64_to_int32" | "%int64_of_nativeint" | "%int64_to_nativeint" ->
     `IDENTITY
+  | "%bswap16" | "%bswap_int32" | "%bswap_int64" | "%bswap_native"
+    ->
+    `ARITH
   | "%ignore" -> `IGNORE
   | "%revapply" | "%apply" -> `APP
   | "%loc_LOC" | "%loc_FILE" | "%loc_LINE" | "%loc_" | "%loc_MODULE"
