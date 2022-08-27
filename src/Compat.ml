@@ -207,7 +207,7 @@ let getMtyFunctorModuleType (moduleType : Types.module_type) =
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
     Some (None, mt)
   | ((Mty_functor (_, mtParam, mt))
-  [@if ocaml_version < (4, 10, 0) || defined npm || defined npm]) ->
+  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
     Some (mtParam, mt)
   | _ -> None
 

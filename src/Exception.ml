@@ -10,14 +10,12 @@ let isRevapply : CL.Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
   | _ -> false
 
-let print_prim : CL.Types.value_description -> unit = function
+let string_of_prim : CL.Types.value_description -> string = function
   | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
-    Printf.printf "prim_name: %s, prim_native_name: %S\n" s1 s2
-  | _ -> ()
+    Printf.sprintf "%s->%S" s1 s2
+  | _ -> ""
 
-let decode : CL.Types.value_description -> rule = function
-  | {val_kind = Val_prim {prim_name = s}} -> Primitive.decode_prim s
-  | _ -> `APP
+let print_prim v = prerr_string @@ string_of_prim v ^ "\n"
 
 let isRaise : CL.Types.value_description -> bool = function
   | {
@@ -42,7 +40,9 @@ let extract c =
   match guard with None -> (lhs, false) | _ -> (lhs, true)
 
 (** add bindings to globalenv when new pattern is introduced *)
-let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
+let rec updateEnv : CL.Typedtree.expression -> unit =
+ fun expr ->
+  match expr.exp_desc with
   | Texp_function {cases} ->
     let value_pg = List.map extract cases in
     let value_p, _ = List.split value_pg in
@@ -63,7 +63,7 @@ let rec updateEnv : CL.Typedtree.expression_desc -> unit = function
   | ((Texp_match (exp, cases, _))
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let p, g = List.split @@ List.map extract cases in
-    let o = List.map Typedtree.split_pattern p in
+    let o = List.map CL.Typedtree.split_pattern p in
     let rec filter o g =
       match o with
       | (Some v, Some e) :: o' -> (
@@ -124,8 +124,6 @@ and updateVar key data =
     CL.Ident.Tbl.add var_to_se key (SESet.union original singleton))
   else CL.Ident.Tbl.add var_to_se key singleton
 
-and se_of_int n = Const (CL.Asttypes.Const_int n)
-
 (** solves p = se and returns the set expression for p *)
 and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
   match p.pat_desc with
@@ -138,16 +136,14 @@ and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
     solveEq p se
   | Tpat_constant c -> Const c
   | Tpat_tuple list -> solveCtor None se list
-  | ((Tpat_construct ({txt}, _, list, _))
+  | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
   [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
-    let constructor = string_of_longident txt in
-    solveCtor (Some constructor) se list
-  | ((Tpat_construct ({txt}, _, list))
+    solveCtor (Some (cstr_name, Some cstr_loc)) se list
+  | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
   [@if ocaml_version < (4, 13, 0) || defined npm]) ->
-    let constructor = string_of_longident txt in
-    solveCtor (Some constructor) se list
+    solveCtor (Some (cstr_name, Some cstr_loc)) se list
   | Tpat_variant (lbl, p_o, _) -> (
-    let constructor = Some lbl in
+    let constructor = Some (lbl, None) in
     match p_o with
     | None -> Ctor (constructor, [Top]) (* hash of the variant name *)
     | Some p ->
@@ -214,9 +210,6 @@ let value_bind (binding : CL.Typedtree.value_binding) =
   updateGlobal [pattern] expr
 
 let update_sc se1 se2 = Hashtbl.add insensitive_sc se1 se2
-let val_of_loc loc = Var (Val (Expr loc))
-let packet_of_loc loc = Var (Packet (Expr loc))
-
 let rec generateSC : CL.Typedtree.expression -> unit =
  fun expr ->
   let val_se = val_of_loc expr.exp_loc in
@@ -238,9 +231,7 @@ let rec generateSC : CL.Typedtree.expression -> unit =
   | Texp_apply (fn, arg) ->
     let fn_val =
       match fn with
-      | {exp_desc = Texp_ident (_, _, {val_kind = Val_prim {prim_name = prim}})}
-        ->
-        Prim prim
+      | {exp_desc = Texp_ident (_, _, {val_kind = Val_prim prim})} -> Prim prim
       | _ -> val_of_loc fn.exp_loc
     in
     let args =
@@ -261,7 +252,7 @@ let rec generateSC : CL.Typedtree.expression -> unit =
     in
     update_sc val_se (App_V (fn_val, args));
     update_sc packet_se (Or (App_P (fn_val, args) :: arg_packet))
-  | Texp_array _ | Texp_assert _ -> ()
+  | _ -> ()
 
 let augmentSC : unit se -> env se = (*rec*) function _ -> Top
 let posToString = Common.posToString
@@ -552,7 +543,7 @@ let traverseAst () =
     if isDoesNoRaise then currentEvents := [];
 
     (* Generate SCs  *)
-    updateEnv expr.exp_desc;
+    updateEnv expr;
 
     (match expr.exp_desc with
     | Texp_ident (callee_, _, val_desc) ->
@@ -758,10 +749,12 @@ let processStructure (structure : CL.Typedtree.structure) =
   if !Common.Cli.debug then print_sc_info ()
 
 let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
+  let id = CL.Ident.create_persistent cmt_infos.cmt_modname in
   match cmt_infos.cmt_annots with
   | Interface _ -> ()
   | Implementation structure ->
     Values.newCmt ();
+    structure |> se_of_struct |> updateVar id;
     structure |> processStructure
   | _ -> ()
 

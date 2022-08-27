@@ -1,3 +1,5 @@
+[%%import "../config.h"]
+
 type param = CL.Typedtree.pattern list
 and arg = code_loc expr option list
 and code_loc = CL.Location.t
@@ -15,9 +17,9 @@ and _ tagged_expr =
 
 and env = Env_var | Env of (param * code_loc tagged_expr) list
 
-(* construct : name |> string_of_longident *)
-(* variant : CL.Asttypes.label *)
-and ctor = string option
+(* construct : Types.cstr_name, Some Types.cstr_loc *)
+(* variant : Asttypes.label *)
+and ctor = (string * code_loc option) option
 
 (* construct : need to know arity *)
 (* record : translate field name to position(int, starts from 0) *)
@@ -57,8 +59,7 @@ and arithop =
   | FLOAT of arith
   | NATURALINT of arith
 
-and relop =
-  | GEN of rel
+and relop = GEN of rel
 
 (* set expression type *)
 and _ se =
@@ -66,7 +67,9 @@ and _ se =
   | Top : _ se (* _ *)
   | Const : CL.Asttypes.constant -> _ se
   | Mem : int -> _ se (* memory location, +\alpha to constructors *)
-  | Prim : string -> _ se (* primitives, later converted to arith/rel/fld/mem *)
+  | Prim :
+      CL.Primitive.description
+      -> _ se (* primitives, later converted to arith/rel/fld/mem *)
   | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
   | Closure :
       param * code_loc expr list * env
@@ -113,40 +116,45 @@ and rule =
   | `WHILE ]
 
 let string_of_arithop : arithop -> string = function
-  INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x ->
-  match x with
-  | ADD -> "+"
-  | SUB -> "-"
-  | DIV -> "÷"
-  | MUL -> "×"
-  | NEG -> "~-"
-  | ABS -> "abs"
-  | MOD -> "mod"
-  | AND -> "&&"
-  | OR -> "||"
-  | NOT -> "not"
-  | XOR -> "xor"
-  | LSL -> "lsl"
-  | LSR -> "lsr"
-  | ASR -> "asr"
-  | SUCC -> "++"
-  | PRED -> "--"
+  | INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x -> (
+    match x with
+    | ADD -> "+"
+    | SUB -> "-"
+    | DIV -> "÷"
+    | MUL -> "×"
+    | NEG -> "~-"
+    | ABS -> "abs"
+    | MOD -> "mod"
+    | AND -> "&&"
+    | OR -> "||"
+    | NOT -> "not"
+    | XOR -> "xor"
+    | LSL -> "lsl"
+    | LSR -> "lsr"
+    | ASR -> "asr"
+    | SUCC -> "++"
+    | PRED -> "--")
 
-let string_of_relop : relop -> string = function GEN x ->
-  match x with
-  | EQ -> "=="
-  | NE -> "!="
-  | LT -> "<"
-  | LE -> "<="
-  | GT -> ">"
-  | GE -> ">="
+let string_of_relop : relop -> string = function
+  | GEN x -> (
+    match x with
+    | EQ -> "=="
+    | NE -> "!="
+    | LT -> "<"
+    | LE -> "<="
+    | GT -> ">"
+    | GE -> ">=")
 
 let address = ref 0
 
-let new_memory () : 'a se=
+let new_memory () : 'a se =
   let mem = Mem !address in
   address := !address + 1;
   mem
+
+let print_loc loc =
+  CL.Location.print_loc Format.str_formatter loc;
+  prerr_string (Format.flush_str_formatter ())
 
 let print_param par =
   prerr_string "[";
@@ -164,8 +172,7 @@ let print_expr : type k. k expr -> unit = function
     prerr_string ")"
   | Expr loc ->
     prerr_string "Expr (";
-    CL.Location.print_loc Format.str_formatter loc;
-    prerr_string (Format.flush_str_formatter ());
+    print_loc loc;
     prerr_string ")"
   | Extern (s, _) ->
     prerr_string "Extern (";
@@ -186,7 +193,10 @@ let rec print_se : unit se -> unit = function
   | Bot -> prerr_string "⊥"
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Mem n -> prerr_string "(Mem "; prerr_int n; prerr_string ")"
+  | Mem n ->
+    prerr_string "(Mem ";
+    prerr_int n;
+    prerr_string ")"
   | Fn (p, list) ->
     prerr_string "<";
     print_param p;
@@ -197,6 +207,7 @@ let rec print_se : unit se -> unit = function
         prerr_string ";")
       list;
     prerr_string "]>"
+  | Prim {prim_name} -> prerr_string ("Prim (" ^ prim_name ^ ")")
   | Var e ->
     prerr_string "X (";
     print_tagged_expr e;
@@ -223,7 +234,7 @@ let rec print_se : unit se -> unit = function
     prerr_string "])"
   | Ctor (k, list) ->
     prerr_string "Con (";
-    (match k with None -> prerr_string " " | Some s -> prerr_string s);
+    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
     prerr_string ", [";
     List.iter
       (fun se ->
@@ -239,7 +250,7 @@ let rec print_se : unit se -> unit = function
     | None, x ->
       prerr_string " , ";
       print_se x
-    | Some s, x ->
+    | Some (s, _), x ->
       prerr_string s;
       prerr_string ", ";
       print_se x);
@@ -266,7 +277,12 @@ let rec print_se : unit se -> unit = function
     let l' = ref l in
     while !l' != [] do
       match !l' with
-      | hd :: tl -> (prerr_string "("; print_se hd; prerr_string ")"; if tl != [] then prerr_string "|"; l' := tl)
+      | hd :: tl ->
+        prerr_string "(";
+        print_se hd;
+        prerr_string ")";
+        if tl != [] then prerr_string "|";
+        l' := tl
       | _ -> assert false
     done
   | Diff (x, y) ->
@@ -315,12 +331,13 @@ let globalenv : globalenv = Hashtbl.create 256
 type var_se_tbl = SESet.t CL.Ident.Tbl.t
 
 let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
+let se_of_int n = Const (CL.Asttypes.Const_int n)
 
 let union_of_list l =
   let make_union acc se =
     match acc with
     | Bot -> se
-    | _ -> (match se with Bot -> acc | _ -> Union (acc, se))
+    | _ -> ( match se with Bot -> acc | _ -> Union (acc, se))
   in
   List.fold_left make_union Bot l
 
@@ -329,6 +346,9 @@ let se_of_var x =
     try SESet.elements (CL.Ident.Tbl.find var_to_se x) with _ -> []
   in
   Or se_list
+
+let val_of_loc loc = Var (Val (Expr loc))
+let packet_of_loc loc = Var (Packet (Expr loc))
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   CL.Ident.(
@@ -346,13 +366,13 @@ let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
 
 (* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
 let rec string_of_longident : CL.Longident.t -> string = function
-  | CL.Longident.Lident s -> s
-  | CL.Longident.Ldot (li, s) -> string_of_longident li ^ "." ^ s
-  | CL.Longident.Lapply (l1, l2) ->
+  | Lident s -> s
+  | Ldot (li, s) -> string_of_longident li ^ "." ^ s
+  | Lapply (l1, l2) ->
     (* applicative functor : see ocamlc -help | grep app-funct *)
     string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
 
-let string_of_typ : CL.Types.type_desc -> string = function
+let string_of_typ : Types.type_desc -> string = function
   | Tvar _ -> "var"
   | Tarrow _ -> "function"
   | Ttuple _ -> "tuple"
@@ -367,32 +387,182 @@ let string_of_typ : CL.Types.type_desc -> string = function
   | Tpoly _ -> "poly"
   | Tpackage _ -> "package"
 
+let se_of_functor (m : CL.Typedtree.module_expr) =
+  match m.mod_desc with
+  | ((Tmod_functor (Named (Some x, {txt = Some s; loc}, _), me))
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    let pat : CL.Typedtree.pattern =
+      {
+        pat_desc = Tpat_var (x, {txt = s; loc});
+        pat_loc = loc;
+        pat_extra = [];
+        pat_type = CL.Btype.newgenvar ();
+        pat_env = m.mod_env;
+        pat_attributes = [];
+      }
+    in
+    Fn ([pat], [Expr me.mod_loc])
+  | ((Tmod_functor (Named (Some x, {txt = None; loc}, _), me))
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    let pat : CL.Typedtree.pattern =
+      {
+        pat_desc = Tpat_var (x, {txt = ""; loc});
+        pat_loc = loc;
+        pat_extra = [];
+        pat_type = CL.Btype.newgenvar ();
+        pat_env = m.mod_env;
+        pat_attributes = [];
+      }
+    in
+    Fn ([pat], [Expr me.mod_loc])
+  | ((Tmod_functor (Unit, me))
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    let loc = CL.Location.mknoloc () in
+    let pat : CL.Typedtree.pattern =
+      {
+        pat_desc = Tpat_any;
+        pat_loc = loc.loc;
+        pat_extra = [];
+        pat_type = CL.Btype.newgenvar ();
+        pat_env = m.mod_env;
+        pat_attributes = [];
+      }
+    in
+    Fn ([pat], [Expr me.mod_loc])
+  | ((Tmod_functor (x, loc, _, me))
+  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
+    let pat : CL.Typedtree.pattern =
+      {
+        pat_desc = Tpat_var (x, loc);
+        pat_loc = loc.loc;
+        pat_extra = [];
+        pat_type = CL.Btype.newgenvar ();
+        pat_env = m.mod_env;
+        pat_attributes = [];
+      }
+    in
+    Fn ([pat], [Expr me.mod_loc])
+  | _ -> failwith "Oops, not a functor but called se_of_functor"
+
+let se_of_mb (mb : CL.Typedtree.module_binding) =
+  match mb with
+  | ({mb_id = Some id; mb_expr = {mod_loc}}
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    [Ctor (Some (CL.Ident.name id, None), [val_of_loc mod_loc])]
+  | ({mb_id; mb_expr = {mod_loc}}
+  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
+    [Ctor (Some (CL.Ident.name mb_id, None), [val_of_loc mod_loc])]
+  | _ -> []
+
+(* a structure_item may bind multiple names, make a list of all possible constructs *)
+let se_of_struct_item (str_item : CL.Typedtree.structure_item) =
+  match str_item.str_desc with
+  | Tstr_value (_, vbs) ->
+    (* correlate the name of the value binding to the list of set expressions it is bound to *)
+    let local_value_name_tbl = Hashtbl.create 1 in
+    (* update the table *)
+    let update_tbl key data =
+      if Hashtbl.mem local_value_name_tbl key then (
+        let original = Hashtbl.find local_value_name_tbl key in
+        Hashtbl.remove local_value_name_tbl key;
+        Hashtbl.add local_value_name_tbl key (data :: original))
+      else Hashtbl.add local_value_name_tbl key [data]
+    in
+    (* update the table while traversing the pattern *)
+    let rec solveEq (pat : CL.Typedtree.pattern) se =
+      match pat.pat_desc with
+      | Tpat_any | Tpat_constant _ -> ()
+      | Tpat_var (x, _) -> update_tbl (CL.Ident.name x) se
+      | Tpat_alias (p, a, _) ->
+        update_tbl (CL.Ident.name a) se;
+        solveEq p se
+      | Tpat_tuple list -> solveCtor None se list
+      | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
+      [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
+        solveCtor (Some (cstr_name, Some cstr_loc)) se list
+      | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
+      [@if ocaml_version < (4, 13, 0) || defined npm]) ->
+        solveCtor (Some (cstr_name, Some cstr_loc)) se list
+      | Tpat_variant (lbl, p_o, _) -> (
+        let constructor = Some (lbl, None) in
+        match p_o with
+        | None -> ()
+        | Some p -> solveEq p (Fld (se, (constructor, se_of_int 1))))
+      | Tpat_record (key_val_list, _) ->
+        let list =
+          List.map
+            (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat))
+            key_val_list
+        in
+        solveRec se list
+      | Tpat_array list -> solveCtor None se list
+      | Tpat_lazy p -> solveEq p (App_V (se, []))
+      | Tpat_or (lhs, rhs, _) ->
+        solveEq lhs se;
+        solveEq rhs se
+    and solveCtor constructor se list =
+      let l = ref list in
+      let i = ref 0 in
+      while !l != [] do
+        (match !l with
+        | hd :: tl ->
+          solveEq hd (Fld (se, (constructor, se_of_int !i)));
+          l := tl
+        | _ -> assert false);
+        i := !i + 1
+      done
+    and solveRec se list =
+      let l = ref list in
+      while !l != [] do
+        match !l with
+        | hd :: tl ->
+          let i, p = hd in
+          solveEq p (Fld (se, (None, se_of_int i)));
+          l := tl
+        | _ -> assert false
+      done
+    in
+    let se_of_vb ({vb_pat; vb_expr = {exp_loc}} : CL.Typedtree.value_binding) =
+      solveEq vb_pat (val_of_loc exp_loc);
+      let seq_of_ctors = Hashtbl.to_seq local_value_name_tbl in
+      let acc_ctors acc (name, or_list) =
+        Ctor (Some (name, None), [Or or_list]) :: acc
+      in
+      Seq.fold_left acc_ctors [] seq_of_ctors
+    in
+    List.flatten (List.map se_of_vb vbs)
+  | Tstr_module mb -> se_of_mb mb
+  | Tstr_recmodule mbs ->
+    List.flatten (List.map se_of_mb mbs)
+  | Tstr_include {incl_mod = {mod_loc}} -> [val_of_loc mod_loc]
+  | _ -> []
+
+(* a struct is a union of constructs *)
+let se_of_struct (str : CL.Typedtree.structure) =
+  let item_list = List.map se_of_struct_item str.str_items in
+  union_of_list (List.flatten item_list)
+
 exception Not_resolvable
 
 let resolve_as_const : unit se -> CL.Asttypes.constant = function
-  | Arith (INT ADD, [x; y]) -> Const_char 'c'
-  | Arith (FLOAT ADD, [x; y]) -> Const_float "1.0"
-  | Arith (INT DIV, [x; y]) -> Const_int 1
-  | Arith (INT MUL, [x; y]) -> Const_int32 1l
-  | Arith (INT SUCC, [x]) -> Const_int64 2L
-  | Arith (INT SUB, [x; y]) -> Const_nativeint 0n
-  | Arith (INT ADD, [x; y])
-  | Arith (INT SUB, [x; y])
-  | Arith (INT DIV, [x; y])
-  | Arith (INT MUL, [x; y])
-  | Arith (INT NEG, [x; y])
-  | Arith (FLOAT ABS, [x; y]) (* absolute value *)
-  | Arith (INT MOD, [x; y])
-  | Arith (INT AND, [x; y])
-  | Arith (INT OR, [x; y])
-  | Arith (INT NOT, [x; y])
-  | Arith (INT XOR, [x; y])
-  | Arith (INT LSL, [x; y]) (* <<, logical *)
-  | Arith (INT LSR, [x; y]) (* >>, logical *)
-  | Arith (INT ASR, [x; y]) -> Const_int 1 (* >>, arithmetic sign extension *)
-  | Arith (INT SUCC, [x]) (* ++x *)
-  | Arith (INT PRED, [x]) -> Const_int 1 (* --x *)
+  | Arith (INT ADD, [_; _]) -> Const_char 'c'
+  | Arith (INT SUB, [_; _]) -> Const_float "1.0"
+  | Arith (INT DIV, [_; _]) -> Const_int 1
+  | Arith (INT MUL, [_; _]) -> Const_int32 1l
+  | Arith (INT NEG, [_; _]) -> Const_int64 2L
+  | Arith (FLOAT ABS, [_]) (* absolute value *) | Arith (INT MOD, [_; _]) ->
+    Const_nativeint 0n
+  | Arith (INT AND, [_; _])
+  | Arith (INT OR, [_; _])
+  | Arith (INT NOT, [_; _])
+  | Arith (INT XOR, [_; _])
+  | Arith (INT LSL, [_; _]) (* <<, logical *)
+  | Arith (INT LSR, [_; _]) (* >>, logical *)
+  | Arith (INT ASR, [_; _]) ->
+    Const_int 1 (* >>, arithmetic sign extension *)
+  | Arith (INT SUCC, [_]) (* ++x *) | Arith (INT PRED, [_]) ->
+    Const_int 1 (* --x *)
+  | _ -> Const_int 1
 
-let resolve_arith : unit se -> unit se = fun e ->
-  try Const (resolve_as_const e) with
-  | Not_resolvable -> Top
+let resolve_arith : unit se -> unit se =
+ fun e -> try Const (resolve_as_const e) with Not_resolvable -> Top
