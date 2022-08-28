@@ -29,186 +29,6 @@ let isRaise : CL.Types.value_description -> bool = function
     true (* do not consider second argument for raise_with_backtrace *)
   | _ -> false
 
-let updateGlobal key data =
-  if key = [] (* empty exn_case or val_case *) then ()
-  else Hashtbl.add globalenv key data
-
-(** determine whether or not to shadow the following cases by checking the existence of a guard *)
-let extract c =
-  let lhs = c.CL.Typedtree.c_lhs in
-  let guard = c.CL.Typedtree.c_guard in
-  match guard with None -> (lhs, false) | _ -> (lhs, true)
-
-(** add bindings to globalenv when new pattern is introduced *)
-let rec updateEnv : CL.Typedtree.expression -> unit =
- fun expr ->
-  match expr.exp_desc with
-  | Texp_function {cases} ->
-    let value_pg = List.map extract cases in
-    let value_p, _ = List.split value_pg in
-    let value_expr = Val (Expr_var value_p) in
-    List.fold_left solveParam (Var value_expr) value_pg |> ignore
-  | ((Texp_match (exp, cases, exn_cases, _))
-  [@if ocaml_version < (4, 08, 0) || defined npm]) ->
-    let value_pg = List.map extract cases in
-    let exn_pg = List.map extract exn_cases in
-    let value_p, _ = List.split value_pg in
-    let exn_p, _ = List.split exn_pg in
-    let value_expr = Val (Expr exp.exp_loc) in
-    let exn_expr = Packet (Expr exp.exp_loc) in
-    updateGlobal value_p value_expr;
-    List.fold_left solveParam (Var value_expr) value_pg |> ignore;
-    updateGlobal exn_p exn_expr;
-    List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
-  | ((Texp_match (exp, cases, _))
-  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
-    let p, g = List.split @@ List.map extract cases in
-    let o = List.map CL.Typedtree.split_pattern p in
-    let rec filter o g =
-      match o with
-      | (Some v, Some e) :: o' -> (
-        match g with
-        | b :: g' ->
-          let v_p, v_g, e_p, e_g = filter o' g' in
-          (v :: v_p, b :: v_g, e :: e_p, b :: e_g)
-        | _ -> assert false)
-      | (Some v, None) :: o' -> (
-        match g with
-        | b :: g' ->
-          let v_p, v_g, e_p, e_g = filter o' g' in
-          (v :: v_p, b :: v_g, e_p, e_g)
-        | _ -> assert false)
-      | (None, Some e) :: o' -> (
-        match g with
-        | b :: g' ->
-          let v_p, v_g, e_p, e_g = filter o' g' in
-          (v_p, v_g, e :: e_p, b :: e_g)
-        | _ -> assert false)
-      | (None, None) :: o' -> (
-        match g with
-        | _ :: g' ->
-          let v_p, v_g, e_p, e_g = filter o' g' in
-          (v_p, v_g, e_p, e_g)
-        | _ -> assert false)
-      | [] -> ([], [], [], [])
-    in
-    let value_p, value_g, exn_p, exn_g = filter o g in
-    let value_expr = Val (Expr exp.exp_loc) in
-    let exn_expr = Packet (Expr exp.exp_loc) in
-    updateGlobal value_p value_expr;
-    List.fold_left solveParam (Var value_expr) (List.combine value_p value_g)
-    |> ignore;
-    updateGlobal exn_p exn_expr;
-    List.fold_left solveParam (Var exn_expr) (List.combine exn_p exn_g)
-    |> ignore
-  | Texp_try (exp, cases) ->
-    let exn_pg = List.map extract cases in
-    let exn_p, _ = List.split exn_pg in
-    let exn_expr = Packet (Expr exp.exp_loc) in
-    updateGlobal exn_p exn_expr;
-    List.fold_left solveParam (Var exn_expr) exn_pg |> ignore
-  | _ -> ()
-
-(** solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
-and solveParam (acc : unit se) (pattern, guarded) =
-  if guarded then (
-    solveEq pattern acc |> ignore;
-    acc)
-  else Diff (acc, solveEq pattern acc)
-
-and updateVar key data =
-  let singleton = SESet.singleton data in
-  if CL.Ident.Tbl.mem var_to_se key then (
-    let original = CL.Ident.Tbl.find var_to_se key in
-    CL.Ident.Tbl.remove var_to_se key;
-    CL.Ident.Tbl.add var_to_se key (SESet.union original singleton))
-  else CL.Ident.Tbl.add var_to_se key singleton
-
-(** solves p = se and returns the set expression for p *)
-and solveEq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
-  match p.pat_desc with
-  | Tpat_any -> Top
-  | Tpat_var (x, _) ->
-    updateVar x se;
-    Top
-  | Tpat_alias (p, a, _) ->
-    updateVar a se;
-    solveEq p se
-  | Tpat_constant c -> Const c
-  | Tpat_tuple list -> solveCtor None se list
-  | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
-  [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
-    solveCtor (Some (cstr_name, Some cstr_loc)) se list
-  | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
-  [@if ocaml_version < (4, 13, 0) || defined npm]) ->
-    solveCtor (Some (cstr_name, Some cstr_loc)) se list
-  | Tpat_variant (lbl, p_o, _) -> (
-    let constructor = Some (lbl, None) in
-    match p_o with
-    | None -> Ctor (constructor, [Top]) (* hash of the variant name *)
-    | Some p ->
-      let sub = solveEq p (Fld (se, (constructor, se_of_int 1))) in
-      Ctor (constructor, [Top; sub]))
-  | Tpat_record (key_val_list, _) ->
-    let list =
-      List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
-    in
-    let lbl_all =
-      match key_val_list with
-      | (_, {CL.Types.lbl_all = l}, _) :: _ -> l
-      | _ -> failwith "Tried to match a record type without any fields"
-    in
-    let len = Array.length lbl_all in
-    solveRec len se list
-  | Tpat_array list -> solveCtor None se list
-  | Tpat_lazy p -> solveEq p (App_V (se, []))
-  | Tpat_or (lhs, rhs, _) -> Union (solveEq lhs se, solveEq rhs se)
-
-and solveCtor constructor se list =
-  let l = ref list in
-  let args = ref [] in
-  let i = ref 0 in
-  while !l != [] do
-    (match !l with
-    | hd :: tl ->
-      let ith_se = solveEq hd (Fld (se, (constructor, se_of_int !i))) in
-      args := ith_se :: !args;
-      l := tl
-    | _ -> assert false);
-    i := !i + 1
-  done;
-  Ctor (constructor, List.rev !args)
-
-and solveRec len se list =
-  let l = ref list in
-  let args = ref [] in
-  let cursor = ref 0 in
-  while !l != [] do
-    match !l with
-    | hd :: tl ->
-      let i, p = hd in
-      let ith_se = solveEq p (Fld (se, (None, se_of_int i))) in
-      while !cursor < i do
-        args := Top :: !args;
-        cursor := !cursor + 1
-      done;
-      args := ith_se :: !args;
-      cursor := !cursor + 1;
-      l := tl
-    | _ -> assert false
-  done;
-  while !cursor < len do
-    args := Top :: !args;
-    cursor := !cursor + 1
-  done;
-  Ctor (None, List.rev !args)
-
-let value_bind (binding : CL.Typedtree.value_binding) =
-  let pattern = binding.vb_pat in
-  let expr = Val (Expr binding.vb_expr.exp_loc) in
-  solveEq pattern (Var expr) |> ignore;
-  updateGlobal [pattern] expr
-
 let update_sc se1 se2 = Hashtbl.add insensitive_sc se1 se2
 let rec generateSC : CL.Typedtree.expression -> unit =
  fun expr ->
@@ -256,10 +76,6 @@ let rec generateSC : CL.Typedtree.expression -> unit =
 
 let augmentSC : unit se -> env se = (*rec*) function _ -> Top
 let posToString = Common.posToString
-
-let print_sc_info () =
-  show_env_map globalenv;
-  show_var_se_tbl var_to_se
 
 module LocSet = Common.LocSet
 
@@ -543,7 +359,7 @@ let traverseAst () =
     if isDoesNoRaise then currentEvents := [];
 
     (* Generate SCs  *)
-    updateEnv expr;
+    se_of_expr expr |> ignore;
 
     (match expr.exp_desc with
     | Texp_ident (callee_, _, val_desc) ->
@@ -694,8 +510,6 @@ let traverseAst () =
   in
   let value_binding (self : CL.Tast_mapper.mapper)
       (vb : CL.Typedtree.value_binding) =
-    let () = value_bind vb in
-    (* update globalenv *)
     let oldId = !currentId in
     let oldEvents = !currentEvents in
     let isFunction =
@@ -746,7 +560,7 @@ let traverseAst () =
 let processStructure (structure : CL.Typedtree.structure) =
   let traverseAst = traverseAst () in
   structure |> traverseAst.structure traverseAst |> ignore;
-  if !Common.Cli.debug then print_sc_info ()
+  if !Common.Cli.debug then PrintSE.print_sc_info ()
 
 let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   let id = CL.Ident.create_persistent cmt_infos.cmt_modname in
@@ -754,7 +568,7 @@ let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     Values.newCmt ();
-    structure |> se_of_struct |> updateVar id;
+    (* structure |> se_of_struct |> updateVar id; *)
     structure |> processStructure
   | _ -> ()
 

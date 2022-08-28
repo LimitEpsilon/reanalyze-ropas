@@ -1,3 +1,30 @@
+open SetExpression
+
+exception Not_resolvable
+
+let resolve_as_const : unit se -> CL.Asttypes.constant = function
+  | Arith (INT ADD, [_; _]) -> Const_char 'c'
+  | Arith (INT SUB, [_; _]) -> Const_float "1.0"
+  | Arith (INT DIV, [_; _]) -> Const_int 1
+  | Arith (INT MUL, [_; _]) -> Const_int32 1l
+  | Arith (INT NEG, [_; _]) -> Const_int64 2L
+  | Arith (FLOAT ABS, [_]) (* absolute value *) | Arith (INT MOD, [_; _]) ->
+    Const_nativeint 0n
+  | Arith (INT AND, [_; _])
+  | Arith (INT OR, [_; _])
+  | Arith (INT NOT, [_; _])
+  | Arith (INT XOR, [_; _])
+  | Arith (INT LSL, [_; _]) (* <<, logical *)
+  | Arith (INT LSR, [_; _]) (* >>, logical *)
+  | Arith (INT ASR, [_; _]) ->
+    Const_int 1 (* >>, arithmetic sign extension *)
+  | Arith (INT SUCC, [_]) (* ++x *) | Arith (INT PRED, [_]) ->
+    Const_int 1 (* --x *)
+  | _ -> Const_int 1
+
+let resolve_arith : unit se -> unit se =
+ fun e -> try Const (resolve_as_const e) with Not_resolvable -> Top
+
 let decode_prim = function
   | "%identity" | "%bytes_to_string" | "%bytes_of_string" -> `IDENTITY
   | "%intoffloat" | "%floatofint" -> `IDENTITY

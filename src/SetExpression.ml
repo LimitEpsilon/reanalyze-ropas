@@ -3,13 +3,7 @@
 type param = CL.Typedtree.pattern list
 and arg = code_loc expr option list
 and code_loc = CL.Location.t
-
-and _ expr =
-  | Expr_var : param -> param expr
-  | Expr : code_loc -> code_loc expr
-  | Extern :
-      string * CL.Types.type_desc
-      -> code_loc expr (* blackbox, includes I/O *)
+and _ expr = Expr_var : param -> param expr | Expr : code_loc -> code_loc expr
 
 and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
@@ -115,193 +109,12 @@ and rule =
   | `FOR
   | `WHILE ]
 
-let string_of_arithop : arithop -> string = function
-  | INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x -> (
-    match x with
-    | ADD -> "+"
-    | SUB -> "-"
-    | DIV -> "÷"
-    | MUL -> "×"
-    | NEG -> "~-"
-    | ABS -> "abs"
-    | MOD -> "mod"
-    | AND -> "&&"
-    | OR -> "||"
-    | NOT -> "not"
-    | XOR -> "xor"
-    | LSL -> "lsl"
-    | LSR -> "lsr"
-    | ASR -> "asr"
-    | SUCC -> "++"
-    | PRED -> "--")
-
-let string_of_relop : relop -> string = function
-  | GEN x -> (
-    match x with
-    | EQ -> "=="
-    | NE -> "!="
-    | LT -> "<"
-    | LE -> "<="
-    | GT -> ">"
-    | GE -> ">=")
-
 let address = ref 0
 
 let new_memory () : 'a se =
   let mem = Mem !address in
   address := !address + 1;
   mem
-
-let print_loc loc =
-  CL.Location.print_loc Format.str_formatter loc;
-  prerr_string (Format.flush_str_formatter ())
-
-let print_param par =
-  prerr_string "[";
-  let print_pattern pat =
-    CL.Printpat.pretty_pat pat;
-    prerr_string "; "
-  in
-  List.iter print_pattern par;
-  prerr_string "]"
-
-let print_expr : type k. k expr -> unit = function
-  | Expr_var p ->
-    prerr_string "Expr_var (";
-    print_param p;
-    prerr_string ")"
-  | Expr loc ->
-    prerr_string "Expr (";
-    print_loc loc;
-    prerr_string ")"
-  | Extern (s, _) ->
-    prerr_string "Extern (";
-    prerr_string s;
-    prerr_string ")"
-
-let print_tagged_expr : type k. k tagged_expr -> unit = function
-  | Val v ->
-    prerr_string "Val (";
-    print_expr v;
-    prerr_string ")"
-  | Packet p ->
-    prerr_string "Packet (";
-    print_expr p;
-    prerr_string ")"
-
-let rec print_se : unit se -> unit = function
-  | Bot -> prerr_string "⊥"
-  | Top -> prerr_string "⊤"
-  | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Mem n ->
-    prerr_string "(Mem ";
-    prerr_int n;
-    prerr_string ")"
-  | Fn (p, list) ->
-    prerr_string "<";
-    print_param p;
-    prerr_string "-> [";
-    List.iter
-      (fun e ->
-        print_expr e;
-        prerr_string ";")
-      list;
-    prerr_string "]>"
-  | Prim {prim_name} -> prerr_string ("Prim (" ^ prim_name ^ ")")
-  | Var e ->
-    prerr_string "X (";
-    print_tagged_expr e;
-    prerr_string ")"
-  | App_V (se, list) ->
-    prerr_string "AppV (";
-    print_se se;
-    prerr_string ", [";
-    List.iter
-      (fun o ->
-        (match o with None -> prerr_string " " | Some e -> print_expr e);
-        prerr_string ";")
-      list;
-    prerr_string "])"
-  | App_P (se, list) ->
-    prerr_string "AppP (";
-    print_se se;
-    prerr_string ", [";
-    List.iter
-      (fun o ->
-        (match o with None -> prerr_string " " | Some e -> print_expr e);
-        prerr_string ";")
-      list;
-    prerr_string "])"
-  | Ctor (k, list) ->
-    prerr_string "Con (";
-    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
-    prerr_string ", [";
-    List.iter
-      (fun se ->
-        print_se se;
-        prerr_string ";")
-      list;
-    prerr_string "])"
-  | Fld (se, lbl) ->
-    prerr_string "Fld (";
-    print_se se;
-    prerr_string ", (";
-    (match lbl with
-    | None, x ->
-      prerr_string " , ";
-      print_se x
-    | Some (s, _), x ->
-      prerr_string s;
-      prerr_string ", ";
-      print_se x);
-    prerr_string "))"
-  | Arith (op, xs) ->
-    Printf.eprintf "( %s ) " (string_of_arithop op);
-    print_ses xs
-  | Rel (rel, xs) ->
-    Printf.eprintf "( %s ) " (string_of_relop rel);
-    print_ses xs
-  | Union (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")∪(";
-    print_se y;
-    prerr_string ")"
-  | Inter (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")∩(";
-    print_se y;
-    prerr_string ")"
-  | Or l ->
-    let l' = ref l in
-    while !l' != [] do
-      match !l' with
-      | hd :: tl ->
-        prerr_string "(";
-        print_se hd;
-        prerr_string ")";
-        if tl != [] then prerr_string "|";
-        l' := tl
-      | _ -> assert false
-    done
-  | Diff (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")-(";
-    print_se y;
-    prerr_string ")"
-  | Cond (x, y) ->
-    prerr_string "if (";
-    print_se x;
-    prerr_string ")=∅ then (";
-    print_se y;
-    prerr_string ") else ∅"
-
-and print_ses (xs : unit se list) =
-  prerr_string "[";
-  List.iter print_se xs;
-  prerr_string "]"
 
 module SE = struct
   type t = unit se
@@ -314,32 +127,32 @@ module SESet = Set.Make (SE)
 let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
 
-type globalenv = (param, code_loc tagged_expr) Hashtbl.t
-
-let show_env_map (env_map : globalenv) =
-  Hashtbl.iter
-    (fun param loc_tagged_expr ->
-      prerr_string "Globalenv :\n param = ";
-      print_param param;
-      prerr_string "\n code_loc tagged_expr = ";
-      print_tagged_expr loc_tagged_expr;
-      prerr_newline ())
-    env_map
-
-let globalenv : globalenv = Hashtbl.create 256
-
 type var_se_tbl = SESet.t CL.Ident.Tbl.t
 
 let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
-let se_of_int n = Const (CL.Asttypes.Const_int n)
+
+let update_var key data =
+  let singleton = SESet.singleton data in
+  if CL.Ident.Tbl.mem var_to_se key then (
+    let original = CL.Ident.Tbl.find var_to_se key in
+    CL.Ident.Tbl.remove var_to_se key;
+    CL.Ident.Tbl.add var_to_se key (SESet.union original singleton))
+  else CL.Ident.Tbl.add var_to_se key singleton
+
+type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
+
+let to_be_resolved : to_be_resolved = Hashtbl.create 256
+let update_to_be key data = Hashtbl.add to_be_resolved key data
 
 let union_of_list l =
   let make_union acc se =
     match acc with
     | Bot -> se
-    | _ -> ( match se with Bot -> acc | _ -> Union (acc, se))
+    | _ -> ( match se with Bot -> acc | _ -> Union (se, acc))
   in
   List.fold_left make_union Bot l
+
+let se_of_int n = Const (CL.Asttypes.Const_int n)
 
 let se_of_var x =
   let se_list =
@@ -350,44 +163,125 @@ let se_of_var x =
 let val_of_loc loc = Var (Val (Expr loc))
 let packet_of_loc loc = Var (Packet (Expr loc))
 
-let show_var_se_tbl (var_to_se : var_se_tbl) =
-  CL.Ident.(
-    Tbl.iter
-      (fun x se ->
-        prerr_string "var_to_se :\n ident = ";
-        prerr_string (unique_name x);
-        prerr_string "\n se = ";
-        let se_list = SESet.elements se in
-        print_se (union_of_list se_list);
-        prerr_newline ())
-      var_to_se)
+(** se_of_something returns (value_of_something, packet_of_something) *)
 
-let undetermined_var : var_se_tbl = CL.Ident.Tbl.create 64
+(** The "value" of a binding is the union of all the "constructs" that are tagged with the bound names *)
+let se_of_mb (mb : CL.Typedtree.module_binding) =
+  match mb with
+  | ({mb_id = Some id; mb_expr = {mod_loc}}
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    update_var id (val_of_loc mod_loc);
+    ( Ctor (Some (CL.Ident.name id, None), [val_of_loc mod_loc]),
+      packet_of_loc mod_loc )
+  | ({mb_id; mb_expr = {mod_loc}}
+  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
+    update_var mb_id (val_of_loc mod_loc);
+    ( Ctor (Some (CL.Ident.name mb_id, None), [val_of_loc mod_loc]),
+      packet_of_loc mod_loc )
+  | {mb_expr = {mod_loc}} -> (Bot, packet_of_loc mod_loc)
 
-(* from https://github.com/ocaml/ocaml/blob/1e52236624bad1c80b3c46857723a35c43974297/ocamldoc/odoc_misc.ml#L83 *)
-let rec string_of_longident : CL.Longident.t -> string = function
-  | Lident s -> s
-  | Ldot (li, s) -> string_of_longident li ^ "." ^ s
-  | Lapply (l1, l2) ->
-    (* applicative functor : see ocamlc -help | grep app-funct *)
-    string_of_longident l1 ^ "(" ^ string_of_longident l2 ^ ")"
+let se_of_vb (vb : CL.Typedtree.value_binding) =
+  let local_binding : (string, unit se list) Hashtbl.t = Hashtbl.create 10 in
+  (* update the table *)
+  let update_tbl key data =
+    if Hashtbl.mem local_binding key then (
+      let original = Hashtbl.find local_binding key in
+      Hashtbl.remove local_binding key;
+      Hashtbl.add local_binding key (data :: original))
+    else Hashtbl.add local_binding key [data]
+  in
+  (* update the table while traversing the pattern *)
+  let rec solve_eq (pat : CL.Typedtree.pattern) se =
+    match pat.pat_desc with
+    | Tpat_any | Tpat_constant _ -> ()
+    | Tpat_var (x, _) ->
+      update_var x se;
+      update_tbl (CL.Ident.name x) se
+    | Tpat_alias (p, a, _) ->
+      update_var a se;
+      update_tbl (CL.Ident.name a) se;
+      solve_eq p se
+    | Tpat_tuple list -> solve_ctor None se list
+    | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
+    [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
+      solve_ctor (Some (cstr_name, Some cstr_loc)) se list
+    | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
+    [@if ocaml_version < (4, 13, 0) || defined npm]) ->
+      solve_ctor (Some (cstr_name, Some cstr_loc)) se list
+    | Tpat_variant (lbl, p_o, _) -> (
+      let constructor = Some (lbl, None) in
+      match p_o with
+      | None -> ()
+      | Some p -> solve_eq p (Fld (se, (constructor, se_of_int 1))))
+    | Tpat_record (key_val_list, _) ->
+      let list =
+        List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
+      in
+      solve_rec se list
+    | Tpat_array list -> solve_ctor None se list
+    | Tpat_lazy p -> solve_eq p (App_V (se, []))
+    | Tpat_or (lhs, rhs, _) ->
+      solve_eq lhs se;
+      solve_eq rhs se
+  and solve_ctor constructor se list =
+    let l = ref list in
+    let i = ref 0 in
+    while !l != [] do
+      (match !l with
+      | hd :: tl ->
+        solve_eq hd (Fld (se, (constructor, se_of_int !i)));
+        l := tl
+      | _ -> assert false);
+      i := !i + 1
+    done
+  and solve_rec se list =
+    let l = ref list in
+    while !l != [] do
+      match !l with
+      | hd :: tl ->
+        let i, p = hd in
+        solve_eq p (Fld (se, (None, se_of_int i)));
+        l := tl
+      | _ -> assert false
+    done
+  in
+  solve_eq vb.vb_pat (val_of_loc vb.vb_expr.exp_loc);
+  let for_each_binding acc (name, list) =
+    Ctor (Some (name, None), [Or list]) :: acc
+  in
+  let seq_of_bindings = Hashtbl.to_seq local_binding in
+  let ctor_list = Seq.fold_left for_each_binding [] seq_of_bindings in
+  (union_of_list ctor_list, packet_of_loc vb.vb_expr.exp_loc)
 
-let string_of_typ : Types.type_desc -> string = function
-  | Tvar _ -> "var"
-  | Tarrow _ -> "function"
-  | Ttuple _ -> "tuple"
-  | Tconstr _ -> "construct"
-  | Tobject _ -> "object"
-  | Tfield _ -> "field"
-  | Tnil -> "nil"
-  | Tlink _ -> "link"
-  | Tsubst _ -> "subst"
-  | Tvariant _ -> "variant"
-  | Tunivar _ -> "univar"
-  | Tpoly _ -> "poly"
-  | Tpackage _ -> "package"
+let se_of_struct_item (item : CL.Typedtree.structure_item) =
+  let for_each_vb (vb : CL.Typedtree.value_binding) =
+    (val_of_loc vb.vb_loc, packet_of_loc vb.vb_loc)
+  in
+  let for_each_mb (mb : CL.Typedtree.module_binding) =
+    (val_of_loc mb.mb_loc, packet_of_loc mb.mb_loc)
+  in
+  match item.str_desc with
+  | Tstr_eval (e, _) -> (Bot, packet_of_loc e.exp_loc)
+  | Tstr_value (_, vbs) ->
+    let v, p = List.split (List.map for_each_vb vbs) in
+    (union_of_list v, Or p)
+  | Tstr_module mb -> for_each_mb mb
+  | Tstr_recmodule mbs ->
+    let v, p = List.split (List.map for_each_mb mbs) in
+    (union_of_list v, Or p)
+  | Tstr_include {incl_mod = {mod_loc}} ->
+    (val_of_loc mod_loc, packet_of_loc mod_loc)
+  | _ -> (Bot, Bot)
 
-let se_of_functor (m : CL.Typedtree.module_expr) =
+(* a struct is a union of constructs *)
+let se_of_struct (str : CL.Typedtree.structure) =
+  let for_each_item (item : CL.Typedtree.structure_item) =
+    (val_of_loc item.str_loc, packet_of_loc item.str_loc)
+  in
+  let v, p = List.split (List.map for_each_item str.str_items) in
+  (union_of_list v, Or p)
+
+let se_of_module_expr (m : CL.Typedtree.module_expr) =
   match m.mod_desc with
   | ((Tmod_functor (Named (Some x, {txt = Some s; loc}, _), me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
@@ -401,7 +295,8 @@ let se_of_functor (m : CL.Typedtree.module_expr) =
         pat_attributes = [];
       }
     in
-    Fn ([pat], [Expr me.mod_loc])
+    update_var x (Var (Val (Expr_var [pat])));
+    (Fn ([pat], [Expr me.mod_loc]), Bot)
   | ((Tmod_functor (Named (Some x, {txt = None; loc}, _), me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
     let pat : CL.Typedtree.pattern =
@@ -414,9 +309,10 @@ let se_of_functor (m : CL.Typedtree.module_expr) =
         pat_attributes = [];
       }
     in
-    Fn ([pat], [Expr me.mod_loc])
-  | ((Tmod_functor (Unit, me))
-  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
+    update_var x (Var (Val (Expr_var [pat])));
+    (Fn ([pat], [Expr me.mod_loc]), Bot)
+  | (Tmod_functor (Named (None, _, _), me) | Tmod_functor (Unit, me))
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm] ->
     let loc = CL.Location.mknoloc () in
     let pat : CL.Typedtree.pattern =
       {
@@ -428,7 +324,7 @@ let se_of_functor (m : CL.Typedtree.module_expr) =
         pat_attributes = [];
       }
     in
-    Fn ([pat], [Expr me.mod_loc])
+    (Fn ([pat], [Expr me.mod_loc]), Bot)
   | ((Tmod_functor (x, loc, _, me))
   [@if ocaml_version < (4, 10, 0) || defined npm]) ->
     let pat : CL.Typedtree.pattern =
@@ -441,128 +337,219 @@ let se_of_functor (m : CL.Typedtree.module_expr) =
         pat_attributes = [];
       }
     in
-    Fn ([pat], [Expr me.mod_loc])
-  | _ -> failwith "Oops, not a functor but called se_of_functor"
+    update_var x (Var (Val (Expr_var [pat])));
+    (Fn ([pat], [Expr me.mod_loc]), Bot)
+  | Tmod_ident (x, {loc}) ->
+    update_to_be loc x;
+    (val_of_loc loc, packet_of_loc loc)
+  | Tmod_structure structure -> se_of_struct structure
+  | Tmod_apply (func, arg, _) ->
+    ( App_V (val_of_loc func.mod_loc, [Some (Expr arg.mod_loc)]),
+      App_P (val_of_loc func.mod_loc, [Some (Expr arg.mod_loc)]) )
+  | Tmod_constraint (m, _, _, _) ->
+    (val_of_loc m.mod_loc, packet_of_loc m.mod_loc)
+  | Tmod_unpack (e, _) -> (val_of_loc e.exp_loc, packet_of_loc e.exp_loc)
 
-let se_of_mb (mb : CL.Typedtree.module_binding) =
-  match mb with
-  | ({mb_id = Some id; mb_expr = {mod_loc}}
-  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    [Ctor (Some (CL.Ident.name id, None), [val_of_loc mod_loc])]
-  | ({mb_id; mb_expr = {mod_loc}}
-  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
-    [Ctor (Some (CL.Ident.name mb_id, None), [val_of_loc mod_loc])]
-  | _ -> []
+(** determine whether or not to shadow the following cases by checking the existence of a guard *)
+let extract c =
+  let lhs = c.CL.Typedtree.c_lhs in
+  let guard = c.CL.Typedtree.c_guard in
+  let rhs = c.CL.Typedtree.c_rhs in
+  match guard with None -> ((lhs, false), rhs) | _ -> ((lhs, true), rhs)
 
-(* a structure_item may bind multiple names, make a list of all possible constructs *)
-let se_of_struct_item (str_item : CL.Typedtree.structure_item) =
-  match str_item.str_desc with
-  | Tstr_value (_, vbs) ->
-    (* correlate the name of the value binding to the list of set expressions it is bound to *)
-    let local_value_name_tbl = Hashtbl.create 1 in
-    (* update the table *)
-    let update_tbl key data =
-      if Hashtbl.mem local_value_name_tbl key then (
-        let original = Hashtbl.find local_value_name_tbl key in
-        Hashtbl.remove local_value_name_tbl key;
-        Hashtbl.add local_value_name_tbl key (data :: original))
-      else Hashtbl.add local_value_name_tbl key [data]
-    in
-    (* update the table while traversing the pattern *)
-    let rec solveEq (pat : CL.Typedtree.pattern) se =
-      match pat.pat_desc with
-      | Tpat_any | Tpat_constant _ -> ()
-      | Tpat_var (x, _) -> update_tbl (CL.Ident.name x) se
-      | Tpat_alias (p, a, _) ->
-        update_tbl (CL.Ident.name a) se;
-        solveEq p se
-      | Tpat_tuple list -> solveCtor None se list
-      | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
-      [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
-        solveCtor (Some (cstr_name, Some cstr_loc)) se list
-      | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
-      [@if ocaml_version < (4, 13, 0) || defined npm]) ->
-        solveCtor (Some (cstr_name, Some cstr_loc)) se list
-      | Tpat_variant (lbl, p_o, _) -> (
-        let constructor = Some (lbl, None) in
-        match p_o with
-        | None -> ()
-        | Some p -> solveEq p (Fld (se, (constructor, se_of_int 1))))
-      | Tpat_record (key_val_list, _) ->
-        let list =
-          List.map
-            (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat))
-            key_val_list
-        in
-        solveRec se list
-      | Tpat_array list -> solveCtor None se list
-      | Tpat_lazy p -> solveEq p (App_V (se, []))
-      | Tpat_or (lhs, rhs, _) ->
-        solveEq lhs se;
-        solveEq rhs se
-    and solveCtor constructor se list =
-      let l = ref list in
-      let i = ref 0 in
-      while !l != [] do
-        (match !l with
-        | hd :: tl ->
-          solveEq hd (Fld (se, (constructor, se_of_int !i)));
-          l := tl
-        | _ -> assert false);
-        i := !i + 1
-      done
-    and solveRec se list =
-      let l = ref list in
-      while !l != [] do
-        match !l with
-        | hd :: tl ->
-          let i, p = hd in
-          solveEq p (Fld (se, (None, se_of_int i)));
-          l := tl
-        | _ -> assert false
-      done
-    in
-    let se_of_vb ({vb_pat; vb_expr = {exp_loc}} : CL.Typedtree.value_binding) =
-      solveEq vb_pat (val_of_loc exp_loc);
-      let seq_of_ctors = Hashtbl.to_seq local_value_name_tbl in
-      let acc_ctors acc (name, or_list) =
-        Ctor (Some (name, None), [Or or_list]) :: acc
+let se_of_expr (expr : CL.Typedtree.expression) =
+  (* solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
+  let rec solve_param (acc : unit se) (pattern, guarded) =
+    if guarded then (
+      solve_eq pattern acc |> ignore;
+      acc)
+    else Diff (acc, solve_eq pattern acc)
+  (* solves p = se and returns the set expression for p *)
+  and solve_eq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
+    match p.pat_desc with
+    | Tpat_any -> Top
+    | Tpat_var (x, _) ->
+      update_var x se;
+      Top
+    | Tpat_alias (p, a, _) ->
+      update_var a se;
+      solve_eq p se
+    | Tpat_constant c -> Const c
+    | Tpat_tuple list -> solve_ctor None se list
+    | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
+    [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
+      solve_ctor (Some (cstr_name, Some cstr_loc)) se list
+    | ((Tpat_construct (_, {cstr_name; cstr_loc}, list))
+    [@if ocaml_version < (4, 13, 0) || defined npm]) ->
+      solve_ctor (Some (cstr_name, Some cstr_loc)) se list
+    | Tpat_variant (lbl, p_o, _) -> (
+      let constructor = Some (lbl, None) in
+      match p_o with
+      | None -> Ctor (constructor, [Top]) (* hash of the variant name *)
+      | Some p ->
+        let sub = solve_eq p (Fld (se, (constructor, se_of_int 1))) in
+        Ctor (constructor, [Top; sub]))
+    | Tpat_record (key_val_list, _) ->
+      let list =
+        List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
       in
-      Seq.fold_left acc_ctors [] seq_of_ctors
+      let lbl_all =
+        match key_val_list with
+        | (_, {CL.Types.lbl_all = l}, _) :: _ -> l
+        | _ -> failwith "Tried to match a record type without any fields"
+      in
+      let len = Array.length lbl_all in
+      solve_rec len se list
+    | Tpat_array list -> solve_ctor None se list
+    | Tpat_lazy p -> solve_eq p (App_V (se, []))
+    | Tpat_or (lhs, rhs, _) -> Union (solve_eq lhs se, solve_eq rhs se)
+  and solve_ctor constructor se list =
+    let l = ref list in
+    let args = ref [] in
+    let i = ref 0 in
+    while !l != [] do
+      (match !l with
+      | hd :: tl ->
+        let ith_se = solve_eq hd (Fld (se, (constructor, se_of_int !i))) in
+        args := ith_se :: !args;
+        l := tl
+      | _ -> assert false);
+      i := !i + 1
+    done;
+    Ctor (constructor, List.rev !args)
+  and solve_rec len se list =
+    let l = ref list in
+    let args = ref [] in
+    let cursor = ref 0 in
+    while !l != [] do
+      match !l with
+      | hd :: tl ->
+        let i, p = hd in
+        let ith_se = solve_eq p (Fld (se, (None, se_of_int i))) in
+        while !cursor < i do
+          args := Top :: !args;
+          cursor := !cursor + 1
+        done;
+        args := ith_se :: !args;
+        cursor := !cursor + 1;
+        l := tl
+      | _ -> assert false
+    done;
+    while !cursor < len do
+      args := Top :: !args;
+      cursor := !cursor + 1
+    done;
+    Ctor (None, List.rev !args)
+  in
+  match expr.exp_desc with
+  | Texp_function {cases} ->
+    let value_pg, body = List.split (List.map extract cases) in
+    let value_p, _ = List.split value_pg in
+    let arg = Var (Val (Expr_var value_p)) in
+    List.fold_left solve_param arg value_pg |> ignore;
+    (Fn (value_p, List.map (fun e -> Expr e.CL.Typedtree.exp_loc) body), Bot)
+  | ((Texp_match (exp, cases, exn_cases, _))
+  [@if ocaml_version < (4, 08, 0) || defined npm]) ->
+    let value_pg, value_body = List.split (List.map extract cases) in
+    let exn_pg, exn_body = List.split (List.map extract exn_cases) in
+    let val_exp = val_of_loc exp.exp_loc in
+    let exn_exp = packet_of_loc exp.exp_loc in
+    let () = List.fold_left solve_param val_exp value_pg |> ignore in
+    let uncaught_exn = List.fold_left solve_param exn_exp exn_pg in
+    let values =
+      List.map
+        (fun e -> val_of_loc e.CL.Typedtree.exp_loc)
+        (value_body @ exn_body)
     in
-    List.flatten (List.map se_of_vb vbs)
-  | Tstr_module mb -> se_of_mb mb
-  | Tstr_recmodule mbs ->
-    List.flatten (List.map se_of_mb mbs)
-  | Tstr_include {incl_mod = {mod_loc}} -> [val_of_loc mod_loc]
-  | _ -> []
+    let exns =
+      List.map
+        (fun e -> packet_of_loc e.CL.Typedtree.exp_loc)
+        (value_body @ exn_body)
+    in
+    (Or values, Or (uncaught_exn :: exns))
+  | ((Texp_match (exp, cases, _))
+  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
+    let pg, body = List.split (List.map extract cases) in
+    let p, g = List.split pg in
+    let o = List.map CL.Typedtree.split_pattern p in
+    let rec filter o g =
+      match o with
+      | (Some v, Some e) :: o' -> (
+        match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v :: v_p, b :: v_g, e :: e_p, b :: e_g)
+        | _ -> assert false)
+      | (Some v, None) :: o' -> (
+        match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v :: v_p, b :: v_g, e_p, e_g)
+        | _ -> assert false)
+      | (None, Some e) :: o' -> (
+        match g with
+        | b :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v_p, v_g, e :: e_p, b :: e_g)
+        | _ -> assert false)
+      | (None, None) :: o' -> (
+        match g with
+        | _ :: g' ->
+          let v_p, v_g, e_p, e_g = filter o' g' in
+          (v_p, v_g, e_p, e_g)
+        | _ -> assert false)
+      | [] -> ([], [], [], [])
+    in
+    let value_p, value_g, exn_p, exn_g = filter o g in
+    let value_pg = List.combine value_p value_g in
+    let exn_pg = List.combine exn_p exn_g in
+    let () =
+      List.fold_left solve_param (val_of_loc exp.exp_loc) value_pg |> ignore
+    in
+    let uncaught_exn =
+      List.fold_left solve_param (packet_of_loc exp.exp_loc) exn_pg
+    in
+    let values = List.map (fun e -> val_of_loc e.CL.Typedtree.exp_loc) body in
+    let exns = List.map (fun e -> packet_of_loc e.CL.Typedtree.exp_loc) body in
+    (Or values, Or (uncaught_exn :: exns))
+  | Texp_try (exp, cases) ->
+    let exn_pg, body = List.split (List.map extract cases) in
+    let uncaught_exn =
+      List.fold_left solve_param (packet_of_loc exp.exp_loc) exn_pg
+    in
+    let values = List.map (fun e -> val_of_loc e.CL.Typedtree.exp_loc) body in
+    let exns = List.map (fun e -> packet_of_loc e.CL.Typedtree.exp_loc) body in
+    (Or values, Or (uncaught_exn :: exns))
+  | Texp_let (_, vbs, e) ->
+    let exns = List.map (fun vb -> packet_of_loc vb.CL.Typedtree.vb_loc) vbs in
+    (val_of_loc e.exp_loc, Or (packet_of_loc e.exp_loc :: exns))
+  | Texp_ident (_, _, {val_kind = Val_prim prim}) -> (Prim prim, Bot)
+  | Texp_ident (x, {loc}, _) ->
+    update_to_be loc x;
+    (val_of_loc loc, packet_of_loc loc)
+  | Texp_constant c -> (Const c, Bot)
+  | Texp_apply (e, args) ->
+    let for_each_arg (_, (o : CL.Typedtree.expression option)) =
+      match o with Some e -> Some (Expr e.exp_loc) | None -> None
+    in
+    let acc_packet acc (_, (o : CL.Typedtree.expression option)) =
+      match o with Some e -> (packet_of_loc e.exp_loc) :: acc | None -> acc
+    in
+    let fn = val_of_loc e.exp_loc in
+    let exn_args = List.fold_left acc_packet [] args in
+    let args = List.map for_each_arg args in
+    (App_V (fn, args), Or (App_P (fn, args) :: exn_args))
+  | Texp_tuple list ->
+    let val_list = List.map (fun e -> val_of_loc e.CL.Typedtree.exp_loc) list in
+    let exn_list =
+      List.map (fun e -> packet_of_loc e.CL.Typedtree.exp_loc) list
+    in
+    (Ctor (None, val_list), Or exn_list)
+  | _ -> (Bot, Bot)
 
-(* a struct is a union of constructs *)
-let se_of_struct (str : CL.Typedtree.structure) =
-  let item_list = List.map se_of_struct_item str.str_items in
-  union_of_list (List.flatten item_list)
-
-exception Not_resolvable
-
-let resolve_as_const : unit se -> CL.Asttypes.constant = function
-  | Arith (INT ADD, [_; _]) -> Const_char 'c'
-  | Arith (INT SUB, [_; _]) -> Const_float "1.0"
-  | Arith (INT DIV, [_; _]) -> Const_int 1
-  | Arith (INT MUL, [_; _]) -> Const_int32 1l
-  | Arith (INT NEG, [_; _]) -> Const_int64 2L
-  | Arith (FLOAT ABS, [_]) (* absolute value *) | Arith (INT MOD, [_; _]) ->
-    Const_nativeint 0n
-  | Arith (INT AND, [_; _])
-  | Arith (INT OR, [_; _])
-  | Arith (INT NOT, [_; _])
-  | Arith (INT XOR, [_; _])
-  | Arith (INT LSL, [_; _]) (* <<, logical *)
-  | Arith (INT LSR, [_; _]) (* >>, logical *)
-  | Arith (INT ASR, [_; _]) ->
-    Const_int 1 (* >>, arithmetic sign extension *)
-  | Arith (INT SUCC, [_]) (* ++x *) | Arith (INT PRED, [_]) ->
-    Const_int 1 (* --x *)
-  | _ -> Const_int 1
-
-let resolve_arith : unit se -> unit se =
- fun e -> try Const (resolve_as_const e) with Not_resolvable -> Top
+(* expr, module_binding, module_expr, structure, structure_item, value_binding, value_bindings *)
+(* se_of_something returns the set expression corresponding to the location of "something" *)
+(* something = expr, module_expr, structure *)
+(* tast_mapper updates set constraints *)
+(* var_to_se) correlates ident to se set_constraints) correlates location to se *)
+(* after all cmt files are processed, lookup to_be_resolved to resolve Path.t. *)
