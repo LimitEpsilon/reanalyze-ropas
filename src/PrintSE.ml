@@ -106,15 +106,15 @@ let rec print_se : unit se -> unit = function
         prerr_string ";")
       list;
     prerr_string "])"
-  | Ctor (k, list) ->
+  | Ctor (k, arr) ->
     prerr_string "Con (";
     (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
     prerr_string ", [";
-    List.iter
+    Array.iter
       (fun se ->
         print_se se;
         prerr_string ";")
-      list;
+      arr;
     prerr_string "])"
   | Fld (se, lbl) ->
     prerr_string "Fld (";
