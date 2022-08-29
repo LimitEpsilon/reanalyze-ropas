@@ -1,7 +1,7 @@
 [%%import "../config.h"]
 
 type param = CL.Typedtree.pattern list
-and arg = code_loc expr option list
+and 'a arg = 'a se option list
 and code_loc = CL.Location.t
 and _ expr = Expr_var : param -> param expr | Expr : code_loc -> code_loc expr
 
@@ -70,9 +70,9 @@ and _ se =
       -> env se (* lambda (p->e)+ / lazy when param = nil *)
   | Var : _ tagged_expr -> unit se (* set variable, context-insensitive *)
   | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
-  | App_V : 'a se * arg -> 'a se (* possible values / force when arg = nil *)
+  | App_V : 'a se * 'a arg -> 'a se (* possible values / force when arg = nil *)
   | App_P :
-      'a se * arg
+      'a se * 'a arg
       -> 'a se (* possible exn packets / force when arg = nil *)
   | Ctor : ctor * 'a se array -> 'a se (* construct / record field *)
   | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
@@ -375,8 +375,8 @@ let se_of_module_expr (m : CL.Typedtree.module_expr) =
     (val_of_loc loc, packet_of_loc loc)
   | Tmod_structure structure -> se_of_struct structure
   | Tmod_apply (func, arg, _) ->
-    ( App_V (val_of_loc func.mod_loc, [Some (Expr arg.mod_loc)]),
-      App_P (val_of_loc func.mod_loc, [Some (Expr arg.mod_loc)]) )
+    ( App_V (val_of_loc func.mod_loc, [Some (val_of_loc arg.mod_loc)]),
+      App_P (val_of_loc func.mod_loc, [Some (val_of_loc arg.mod_loc)]) )
   | Tmod_constraint (m, _, _, _) ->
     (val_of_loc m.mod_loc, packet_of_loc m.mod_loc)
   | Tmod_unpack (e, _) -> (val_of_loc e.exp_loc, packet_of_loc e.exp_loc)
@@ -561,7 +561,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | Texp_constant c -> (Const c, Bot)
   | Texp_apply (e, args) ->
     let for_each_arg (_, (o : CL.Typedtree.expression option)) =
-      match o with Some e -> Some (Expr e.exp_loc) | None -> None
+      match o with Some e -> Some (val_of_loc e.exp_loc) | None -> None
     in
     let acc_packet acc (_, (o : CL.Typedtree.expression option)) =
       match o with Some e -> packet_of_loc e.exp_loc :: acc | None -> acc
@@ -679,8 +679,20 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     update_var x val_x;
     update_sc val_x val_m;
     (val_e, Or [exn_m; exn_e])
+  | ((Texp_letmodule (x, {loc}, _, {mod_loc}, {exp_loc}))
+  [@if
+    ocaml_version >= (4, 08, 0) && ocaml_version < (4, 10, 0) && not_defined npm])
+    ->
+    let val_x = val_of_loc loc in
+    let val_m = val_of_loc mod_loc in
+    let val_e = val_of_loc exp_loc in
+    let exn_m = packet_of_loc mod_loc in
+    let exn_e = packet_of_loc exp_loc in
+    update_var x val_x;
+    update_sc val_x val_m;
+    (val_e, Or [exn_m; exn_e])
   | ((Texp_letmodule (Some x, {loc}, _, {mod_loc}, {exp_loc}))
-  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
     let val_x = val_of_loc loc in
     let val_m = val_of_loc mod_loc in
     let val_e = val_of_loc exp_loc in
@@ -690,7 +702,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     update_sc val_x val_m;
     (val_e, Or [exn_m; exn_e])
   | ((Texp_letmodule (None, _, _, {mod_loc}, {exp_loc}))
-  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
+  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
     let val_e = val_of_loc exp_loc in
     let exn_m = packet_of_loc mod_loc in
     let exn_e = packet_of_loc exp_loc in
@@ -702,9 +714,29 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     (Bot, packet_of_loc exp_loc)
   | Texp_lazy {exp_loc} -> (Fn ([], [Expr exp_loc]), Bot)
   | Texp_pack {mod_loc} -> (val_of_loc mod_loc, packet_of_loc mod_loc)
-  | ((Texp_letop {let_; ands; param; body; partial})
+  | ((Texp_letop {let_; ands; body})
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
-    (Bot, Bot)
+    let let_path = let_.bop_op_path in
+    let letop = val_of_loc let_.bop_op_name.loc in
+    let bound =
+      (val_of_loc let_.bop_exp.exp_loc, [packet_of_loc let_.bop_exp.exp_loc])
+    in
+    let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
+      let and_path = andop.bop_op_path in
+      let and_val = val_of_loc andop.bop_op_name.loc in
+      let bound_val = val_of_loc andop.bop_exp.exp_loc in
+      let exn = packet_of_loc andop.bop_exp.exp_loc in
+      let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
+      update_to_be andop.bop_op_name.loc and_path;
+      (updated_val, exn :: acc_exn_list)
+    in
+    let bound_expr, exns = List.fold_left for_each_and bound ands in
+    let body_fn = Fn ([body.c_lhs], [Expr body.c_rhs.exp_loc]) in
+    let value = App_V (letop, [Some bound_expr; Some body_fn]) in
+    let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
+    solve_eq body.c_lhs (Var (Val (Expr_var [body.c_lhs]))) |> ignore;
+    update_to_be let_.bop_op_name.loc let_path;
+    (value, Or (exn :: exns))
   | ((Texp_open (_, {exp_loc}))
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     (val_of_loc exp_loc, packet_of_loc exp_loc)

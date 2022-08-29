@@ -92,7 +92,7 @@ let rec print_se : unit se -> unit = function
     prerr_string ", [";
     List.iter
       (fun o ->
-        (match o with None -> prerr_string " " | Some e -> print_expr e);
+        (match o with None -> prerr_string " " | Some se -> print_se se);
         prerr_string ";")
       list;
     prerr_string "])"
@@ -102,7 +102,7 @@ let rec print_se : unit se -> unit = function
     prerr_string ", [";
     List.iter
       (fun o ->
-        (match o with None -> prerr_string " " | Some e -> print_expr e);
+        (match o with None -> prerr_string " " | Some se -> print_se se);
         prerr_string ";")
       list;
     prerr_string "])"

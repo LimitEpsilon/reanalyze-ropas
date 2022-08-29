@@ -58,7 +58,7 @@ let rec generateSC : CL.Typedtree.expression -> unit =
       List.map
         (fun (_, o) ->
           match o with
-          | Some e -> Some (Expr e.CL.Typedtree.exp_loc)
+          | Some e -> Some (val_of_loc e.CL.Typedtree.exp_loc)
           | _ -> None)
         arg
     in
