@@ -275,7 +275,7 @@
   addValueDeclaration +x DeadTestWithInterface.res:2:2 path:+DeadTestWithInterface.Ext_buffer
   addValueDeclaration +x DeadTestWithInterface.res:4:6 path:+DeadTestWithInterface.Ext_buffer
   addValueReference DeadTestWithInterface.res:2:2 --> DeadTestWithInterface.res:4:6
-  Interface 0
+  Scanning DeadTestWithInterface.cmti Source:DeadTestWithInterface.resi
   Scanning DeadTypeTest.cmt Source:DeadTypeTest.res
   addValueDeclaration +a DeadTypeTest.res:4:4 path:+DeadTypeTest
   addVariantCaseDeclaration A DeadTypeTest.res:2:2 path:+DeadTypeTest.t
@@ -1873,6 +1873,7 @@ File References
   DeadTest.res -->> React.res, BootloaderResource.res, DeadValueTest.resi, DynamicallyLoadedComponent.res, ImmutableArray.resi, JSResource.res, ExportWithRename.res
   DeadTestBlacklist.res -->> 
   DeadTestWithInterface.res -->> 
+  DeadTestWithInterface.resi -->> 
   DeadTypeTest.res -->> 
   DeadTypeTest.resi -->> DeadTypeTest.res
   DeadValueTest.res -->> 

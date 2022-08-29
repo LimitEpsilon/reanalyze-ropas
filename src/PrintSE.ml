@@ -36,11 +36,7 @@ let print_loc loc =
 
 let print_param par =
   prerr_string "[";
-  let print_pattern pat =
-    CL.Printpat.pretty_pat pat;
-    prerr_string "; "
-  in
-  List.iter print_pattern par;
+  List.iter print_loc par;
   prerr_string "]"
 
 let print_expr : type k. k expr -> unit = function

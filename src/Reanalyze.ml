@@ -15,7 +15,7 @@ let loadCmtFile cmtFilePath =
            try String.sub sourceFile 0 (String.length prefix) = prefix
            with Invalid_argument _ -> false)
   in
-  match cmt_infos.cmt_annots |> FindSourceFile.cmt with
+  match cmt_infos.cmt_sourcefile with
   | Some sourceFile when not (excludePath sourceFile) ->
     if !Cli.debug then
       Log_.item "Scanning %s Source:%s@."

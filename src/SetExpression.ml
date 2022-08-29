@@ -1,8 +1,8 @@
 [%%import "../config.h"]
 
-type param = CL.Typedtree.pattern list
+type code_loc = CL.Location.t
+and param = code_loc list
 and 'a arg = 'a se option list
-and code_loc = CL.Location.t
 and _ expr = Expr_var : param -> param expr | Expr : code_loc -> code_loc expr
 
 and _ tagged_expr =
@@ -187,7 +187,12 @@ let se_of_int n = Const (CL.Asttypes.Const_int n)
 
 let se_of_var x =
   let se_list =
-    try SESet.elements (CL.Ident.Tbl.find var_to_se x) with _ -> []
+    try SESet.elements (CL.Ident.Tbl.find var_to_se x)
+    with err ->
+      if !Common.Cli.debug then
+        prerr_string
+          ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
+      raise err
   in
   Or se_list
 
@@ -300,8 +305,24 @@ let se_of_struct_item (item : CL.Typedtree.structure_item) =
   | Tstr_recmodule mbs ->
     let v, p = List.split (List.map for_each_mb mbs) in
     (union_of_list v, Or p)
-  | Tstr_include {incl_mod = {mod_loc}} ->
-    (val_of_loc mod_loc, packet_of_loc mod_loc)
+  | Tstr_include {incl_mod = {mod_loc}; incl_type} ->
+    let value = val_of_loc mod_loc in
+    let exn = packet_of_loc mod_loc in
+    (* rebind included values & modules *)
+    let for_each_sig_item : CL.Types.signature_item -> unit = function
+      | (Sig_value (x, _) | Sig_module (x, _, _))
+      [@if ocaml_version < (4, 08, 0) || defined npm] ->
+        update_var x (Fld (value, (Some (CL.Ident.name x, None), se_of_int 0)))
+      | (Sig_value (x, _, _) | Sig_module (x, _, _, _, _))
+      [@if ocaml_version >= (4, 08, 0) && not_defined npm] ->
+        update_var x (Fld (value, (Some (CL.Ident.name x, None), se_of_int 0)))
+      | _ -> ()
+    in
+    List.iter for_each_sig_item incl_type;
+    (value, exn)
+  | Tstr_primitive {val_id; val_val = {val_kind = Val_prim prim}} ->
+    update_var val_id (Prim prim);
+    (Prim prim, Bot)
   | _ -> (Bot, Bot)
 
 (* a struct is a union of constructs *)
@@ -314,62 +335,17 @@ let se_of_struct (str : CL.Typedtree.structure) =
 
 let se_of_module_expr (m : CL.Typedtree.module_expr) =
   match m.mod_desc with
-  | ((Tmod_functor (Named (Some x, {txt = Some s; loc}, _), me))
+  | ((Tmod_functor (Named (Some x, {loc}, _), me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    let pat : CL.Typedtree.pattern =
-      {
-        pat_desc = Tpat_var (x, {txt = s; loc});
-        pat_loc = loc;
-        pat_extra = [];
-        pat_type = CL.Btype.newgenvar ();
-        pat_env = m.mod_env;
-        pat_attributes = [];
-      }
-    in
-    update_var x (Var (Val (Expr_var [pat])));
-    (Fn ([pat], [Expr me.mod_loc]), Bot)
-  | ((Tmod_functor (Named (Some x, {txt = None; loc}, _), me))
-  [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    let pat : CL.Typedtree.pattern =
-      {
-        pat_desc = Tpat_var (x, {txt = ""; loc});
-        pat_loc = loc;
-        pat_extra = [];
-        pat_type = CL.Btype.newgenvar ();
-        pat_env = m.mod_env;
-        pat_attributes = [];
-      }
-    in
-    update_var x (Var (Val (Expr_var [pat])));
-    (Fn ([pat], [Expr me.mod_loc]), Bot)
+    update_var x (Var (Val (Expr_var [loc])));
+    (Fn ([loc], [Expr me.mod_loc]), Bot)
   | (Tmod_functor (Named (None, _, _), me) | Tmod_functor (Unit, me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm] ->
-    let loc = CL.Location.mknoloc () in
-    let pat : CL.Typedtree.pattern =
-      {
-        pat_desc = Tpat_any;
-        pat_loc = loc.loc;
-        pat_extra = [];
-        pat_type = CL.Btype.newgenvar ();
-        pat_env = m.mod_env;
-        pat_attributes = [];
-      }
-    in
-    (Fn ([pat], [Expr me.mod_loc]), Bot)
-  | ((Tmod_functor (x, loc, _, me))
+    (Fn ([CL.Location.none], [Expr me.mod_loc]), Bot)
+  | ((Tmod_functor (x, {loc}, _, me))
   [@if ocaml_version < (4, 10, 0) || defined npm]) ->
-    let pat : CL.Typedtree.pattern =
-      {
-        pat_desc = Tpat_var (x, loc);
-        pat_loc = loc.loc;
-        pat_extra = [];
-        pat_type = CL.Btype.newgenvar ();
-        pat_env = m.mod_env;
-        pat_attributes = [];
-      }
-    in
-    update_var x (Var (Val (Expr_var [pat])));
-    (Fn ([pat], [Expr me.mod_loc]), Bot)
+    update_var x (Var (Val (Expr_var [loc])));
+    (Fn ([loc], [Expr me.mod_loc]), Bot)
   | Tmod_ident (x, {loc}) ->
     update_to_be loc x;
     (val_of_loc loc, packet_of_loc loc)
@@ -484,9 +460,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | Texp_function {cases} ->
     let value_pg, body = List.split (List.map extract cases) in
     let value_p, _ = List.split value_pg in
-    let arg = Var (Val (Expr_var value_p)) in
+    let param = List.map (fun p -> p.CL.Typedtree.pat_loc) value_p in
+    let arg = Var (Val (Expr_var param)) in
     List.fold_left solve_param arg value_pg |> ignore;
-    (Fn (value_p, List.map (fun e -> Expr e.CL.Typedtree.exp_loc) body), Bot)
+    (Fn (param, List.map (fun e -> Expr e.CL.Typedtree.exp_loc) body), Bot)
   | ((Texp_match (exp, cases, exn_cases, _))
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let value_pg, value_body = List.split (List.map extract cases) in
@@ -731,10 +708,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       (updated_val, exn :: acc_exn_list)
     in
     let bound_expr, exns = List.fold_left for_each_and bound ands in
-    let body_fn = Fn ([body.c_lhs], [Expr body.c_rhs.exp_loc]) in
+    let body_fn = Fn ([body.c_lhs.pat_loc], [Expr body.c_rhs.exp_loc]) in
     let value = App_V (letop, [Some bound_expr; Some body_fn]) in
     let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
-    solve_eq body.c_lhs (Var (Val (Expr_var [body.c_lhs]))) |> ignore;
+    solve_eq body.c_lhs (Var (Val (Expr_var [body.c_lhs.pat_loc]))) |> ignore;
     update_to_be let_.bop_op_name.loc let_path;
     (value, Or (exn :: exns))
   | ((Texp_open (_, {exp_loc}))
@@ -743,8 +720,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | _ -> (Bot, Bot)
 
 (* expr, module_binding, module_expr, structure, structure_item, value_binding, value_bindings *)
-(* se_of_something returns the set expression corresponding to the location of "something" *)
-(* something = expr, module_expr, structure *)
-(* tast_mapper updates set constraints *)
+(* se_of_something returns the set expressions corresponding to the location of "something" *)
+(* tast_mapper connects val/exns returned by se_of_something with the code_loc of the AST node *)
 (* var_to_se) correlates ident to se set_constraints) correlates location to se *)
 (* after all cmt files are processed, lookup to_be_resolved to resolve Path.t. *)
