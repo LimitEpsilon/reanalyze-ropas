@@ -1,3 +1,5 @@
+[%%import "../dev.h"]
+
 open Common
 
 let loadCmtFile cmtFilePath =
@@ -227,4 +229,8 @@ let cli () =
   [@@raises exit]
 ;;
 
-cli () [@@raises exit]
+(match () with
+| (() [@if defined dev]) -> Memtrace.trace_if_requested ()
+| (() [@if not_defined dev]) -> ());
+cli ()
+[@@raises exit]
