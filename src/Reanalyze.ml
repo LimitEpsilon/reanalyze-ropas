@@ -16,7 +16,8 @@ let loadCmtFile cmtFilePath =
            with Invalid_argument _ -> false)
   in
   match cmt_infos.cmt_sourcefile with
-  | Some sourceFile when not (excludePath sourceFile) ->
+  | Some sourceFile when not (excludePath sourceFile || excludePath cmtFilePath)
+    ->
     if !Cli.debug then
       Log_.item "Scanning %s Source:%s@."
         (match !Cli.ci && not (Filename.is_relative cmtFilePath) with
