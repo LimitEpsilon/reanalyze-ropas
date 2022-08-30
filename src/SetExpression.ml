@@ -128,17 +128,17 @@ let insensitive_sc : (unit se, unit se) Hashtbl.t = Hashtbl.create 256
 let sensitive_sc : (env se, env se) Hashtbl.t = Hashtbl.create 256
 let update_sc se1 se2 = Hashtbl.add insensitive_sc se1 se2
 
-type var_se_tbl = SESet.t CL.Ident.Tbl.t
+type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
-let var_to_se : var_se_tbl = CL.Ident.Tbl.create 256
+let var_to_se : var_se_tbl = Hashtbl.create 256
 
 let update_var key data =
   let singleton = SESet.singleton data in
-  if CL.Ident.Tbl.mem var_to_se key then (
-    let original = CL.Ident.Tbl.find var_to_se key in
-    CL.Ident.Tbl.remove var_to_se key;
-    CL.Ident.Tbl.add var_to_se key (SESet.union original singleton))
-  else CL.Ident.Tbl.add var_to_se key singleton
+  if Hashtbl.mem var_to_se key then (
+    let original = Hashtbl.find var_to_se key in
+    Hashtbl.remove var_to_se key;
+    Hashtbl.add var_to_se key (SESet.union original singleton))
+  else Hashtbl.add var_to_se key singleton
 
 type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
 
@@ -187,7 +187,7 @@ let se_of_int n = Const (CL.Asttypes.Const_int n)
 
 let se_of_var x =
   let se_list =
-    try SESet.elements (CL.Ident.Tbl.find var_to_se x)
+    try SESet.elements (Hashtbl.find var_to_se x)
     with err ->
       if !Common.Cli.debug then
         prerr_string
@@ -320,9 +320,6 @@ let se_of_struct_item (item : CL.Typedtree.structure_item) =
     in
     List.iter for_each_sig_item incl_type;
     (value, exn)
-  | Tstr_primitive {val_id; val_val = {val_kind = Val_prim prim}} ->
-    update_var val_id (Prim prim);
-    (Prim prim, Bot)
   | _ -> (Bot, Bot)
 
 (* a struct is a union of constructs *)

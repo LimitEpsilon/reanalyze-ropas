@@ -184,16 +184,14 @@ and print_ses (xs : unit se list) =
 (*     env_map *)
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
-  CL.Ident.(
-    Tbl.iter
-      (fun x se ->
-        prerr_string "var_to_se :\n ident = ";
-        prerr_string (unique_name x);
-        prerr_string "\n se = ";
-        let se_list = SESet.elements se in
-        print_se (union_of_list se_list);
-        prerr_newline ())
-      var_to_se)
+  Hashtbl.iter
+    (fun x se ->
+      prerr_string "var_to_se :\n ident = ";
+      prerr_string (CL.Ident.unique_name x);
+      prerr_string "\n se = ";
+      let se_list = SESet.elements se in
+      print_se (union_of_list se_list);
+      prerr_newline ())
+    var_to_se
 
-let print_sc_info () =
-  show_var_se_tbl var_to_se
+let print_sc_info () = show_var_se_tbl var_to_se
