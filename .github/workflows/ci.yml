@@ -69,7 +69,7 @@ jobs:
 
     - run: npm ci
 
-    - run: opam install dune cppo ppx_optcomp memtrace
+    - run: opam install dune cppo ppx_optcomp
 
     - name: Pre-build
       if: matrix.os == 'windows-latest'
