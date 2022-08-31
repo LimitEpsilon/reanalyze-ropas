@@ -45,7 +45,7 @@ let rec resolve_path (path : CL.Path.t) =
 
 let resolve_to_be_resolved () =
   let resolve loc path =
-    try update_sc (val_of_loc loc) (resolve_path path)
+    try update_sc (val_of_loc loc) [resolve_path path]
     with _ ->
       if !Common.Cli.debug then (
         prerr_string "Look at : ";
@@ -56,7 +56,7 @@ let resolve_to_be_resolved () =
 
 let exn_of_file = Hashtbl.create 10
 
-let update_exn_of_file (key : string) (data : unit se) =
+let update_exn_of_file (key : string) (data : unit se list) =
   Hashtbl.add exn_of_file key data
 
 let connect_node_to_se loc v p =
@@ -65,6 +65,21 @@ let connect_node_to_se loc v p =
   update_sc value v;
   update_sc exn p
 
+(* module A = struct
+  let x = 1 (* se_of_struct_item : X("x=1"의 location), se_of_vb : Ctor(x, 1) *)
+  (* connect_node_to_se : 
+     X("let x = 1"의 location) = X("x=1"의 location),
+     X("x=1"의 location) = Ctor(x, 1) *)
+end *)
+
+(*
+let a = ref 0
+let b = ref 1
+let f () = match input with | 1 -> a | _ -> b
+{a, b} - {c,d} {a-c,a-d, b-c,b-d}
+let () = incr (f ()) (* a <- 1 | b <- 1 *) (* {a} <- 1, {a, b} <- 1 => {a <-1 , b <- 1} {a <- 1, b <- 1} *)
+let c = !a
+*)
 let traverse_ast () =
   let super = CL.Tast_mapper.default in
   let expr (self : CL.Tast_mapper.mapper) (expr : CL.Typedtree.expression) =
@@ -114,7 +129,7 @@ let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
-    update_var id v;
+    update_var id (Union v);
     update_exn_of_file filename p;
     structure |> process_structure
   | _ -> ()

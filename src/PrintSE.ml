@@ -60,7 +60,6 @@ let print_tagged_expr : type k. k tagged_expr -> unit = function
     prerr_string ")"
 
 let rec print_se : unit se -> unit = function
-  | Bot -> prerr_string "⊥"
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
   | Mem n ->
@@ -131,30 +130,10 @@ let rec print_se : unit se -> unit = function
   | Rel (rel, xs) ->
     Printf.eprintf "( %s ) " (string_of_relop rel);
     print_ses xs
-  | Union (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")∪(";
-    print_se y;
-    prerr_string ")"
-  | Inter (x, y) ->
-    prerr_string "(";
-    print_se x;
-    prerr_string ")∩(";
-    print_se y;
-    prerr_string ")"
-  | Or l ->
-    let l' = ref l in
-    while !l' != [] do
-      match !l' with
-      | hd :: tl ->
-        prerr_string "(";
-        print_se hd;
-        prerr_string ")";
-        if tl != [] then prerr_string "|";
-        l' := tl
-      | _ -> assert false
-    done
+  | Union l ->
+    print_with_separator l "∪"
+  | Inter l ->
+    print_with_separator l "∩"
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
@@ -173,6 +152,19 @@ and print_ses (xs : unit se list) =
   List.iter print_se xs;
   prerr_string "]"
 
+and print_with_separator l sep =
+  let l' = ref l in
+  while !l' != [] do
+    match !l' with
+    | hd :: tl ->
+      prerr_string "(";
+      print_se hd;
+      prerr_string ")";
+      if tl != [] then prerr_string sep;
+      l' := tl
+    | _ -> assert false
+  done
+  
 (* let show_env_map (env_map : globalenv) = *)
 (*   Hashtbl.iter *)
 (*     (fun param loc_tagged_expr -> *)
