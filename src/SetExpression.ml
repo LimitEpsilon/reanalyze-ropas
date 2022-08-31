@@ -147,7 +147,12 @@ type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
 
 let to_be_resolved : to_be_resolved = Hashtbl.create 256
 let update_to_be key data = Hashtbl.add to_be_resolved key data
-let union_of_list l = Union l
+
+let union_of_list l =
+  let for_each_se acc se =
+    match se with Union l -> List.rev_append l acc | se -> se :: acc
+  in
+  Union (List.fold_left for_each_se [] l)
 
 let list_rev_to_array l init =
   let len = List.length l in
@@ -190,7 +195,7 @@ let se_of_var x =
           ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
       raise err
   in
-  Union se_list
+  union_of_list se_list
 
 let val_of_loc loc = Var (Val (Expr loc))
 let packet_of_loc loc = Var (Packet (Expr loc))
@@ -279,7 +284,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
   in
   solve_eq vb.vb_pat (val_of_loc vb.vb_expr.exp_loc);
   let for_each_binding acc (name, list) =
-    Ctor (Some (name, None), [|Union list|]) :: acc
+    Ctor (Some (name, None), [|union_of_list list|]) :: acc
   in
   let seq_of_bindings = Hashtbl.to_seq local_binding in
   let ctor_list = Seq.fold_left for_each_binding [] seq_of_bindings in
@@ -409,7 +414,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       solve_rec len se list
     | Tpat_array list -> solve_ctor None se list
     | Tpat_lazy p -> solve_eq p (App_V (se, []))
-    | Tpat_or (lhs, rhs, _) -> Union [solve_eq lhs se; solve_eq rhs se]
+    | Tpat_or (lhs, rhs, _) -> union_of_list [solve_eq lhs se; solve_eq rhs se]
   and solve_ctor constructor se list =
     let l = ref list in
     let args = ref [] in
@@ -643,7 +648,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       match direction with Upto -> INT ADD | Downto -> INT SUB
     in
     update_var i val_i;
-    update_sc val_i [Union [val_start; Arith (update_op, [val_i; se_of_int 1])]];
+    update_sc val_i
+      [union_of_list [val_start; Arith (update_op, [val_i; se_of_int 1])]];
     ([], [exn_start; exn_finish; exn_body])
   | ((Texp_letmodule (x, {loc}, {mod_loc}, {exp_loc}))
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
