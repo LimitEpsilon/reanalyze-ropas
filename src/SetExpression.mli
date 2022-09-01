@@ -90,53 +90,7 @@ module SE : sig
   val compare : 'a -> 'a -> int
 end
 
-module SESet : sig
-  type elt = SE.t
-  type t = Stdlib__Set.Make(SE).t
-
-  val empty : t
-  val is_empty : t -> bool
-  val mem : elt -> t -> bool
-  val add : elt -> t -> t
-  val singleton : elt -> t
-  val remove : elt -> t -> t
-  val union : t -> t -> t
-  val inter : t -> t -> t
-  val disjoint : t -> t -> bool
-  val diff : t -> t -> t
-  val compare : t -> t -> int
-  val equal : t -> t -> bool
-  val subset : t -> t -> bool
-  val iter : (elt -> unit) -> t -> unit
-  val map : (elt -> elt) -> t -> t
-  val fold : (elt -> 'a -> 'a) -> t -> 'a -> 'a
-  val for_all : (elt -> bool) -> t -> bool
-  val exists : (elt -> bool) -> t -> bool
-  val filter : (elt -> bool) -> t -> t
-  val filter_map : (elt -> elt option) -> t -> t
-  val partition : (elt -> bool) -> t -> t * t
-  val cardinal : t -> int
-  val elements : t -> elt list
-  val min_elt : t -> elt
-  val min_elt_opt : t -> elt option
-  val max_elt : t -> elt
-  val max_elt_opt : t -> elt option
-  val choose : t -> elt
-  val choose_opt : t -> elt option
-  val split : elt -> t -> t * bool * t
-  val find : elt -> t -> elt
-  val find_opt : elt -> t -> elt option
-  val find_first : (elt -> bool) -> t -> elt
-  val find_first_opt : (elt -> bool) -> t -> elt option
-  val find_last : (elt -> bool) -> t -> elt
-  val find_last_opt : (elt -> bool) -> t -> elt option
-  val of_list : elt list -> t
-  val to_seq_from : elt -> t -> elt Seq.t
-  val to_seq : t -> elt Seq.t
-  val to_rev_seq : t -> elt Seq.t
-  val add_seq : elt Seq.t -> t -> t
-  val of_seq : elt Seq.t -> t
-end
+module SESet : Set.S with type elt = SE.t
 
 val insensitive_sc : (unit se, SESet.t) Hashtbl.t
 val sensitive_sc : (env se, env se list) Hashtbl.t
@@ -152,8 +106,9 @@ type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
 val to_be_resolved : to_be_resolved
 val update_to_be : code_loc -> CL.Path.t -> unit
 val union_of_list : 'a se list -> 'a se
-val list_rev_to_array : 'a list -> 'a -> 'a array
-val list_to_array : 'a list -> 'a -> 'a array
+
+(* val list_rev_to_array : 'a list -> 'a -> 'a array *)
+(* val list_to_array : 'a list -> 'a -> 'a array *)
 val se_of_int : int -> 'a se
 val se_of_var : CL.Ident.t -> unit se
 val val_of_loc : code_loc -> unit se
@@ -164,8 +119,8 @@ val se_of_struct_item : CL.Typedtree.structure_item -> unit se * unit se
 val se_of_struct : CL.Typedtree.structure -> unit se * unit se
 val se_of_module_expr : CL.Typedtree.module_expr -> unit se * unit se
 
-val extract :
-  'a CL.Typedtree.case ->
-  ('a CL.Typedtree.general_pattern * bool) * CL.Typedtree.expression
+(* val extract :
+ *   'a CL.Typedtree.case ->
+ *   ('a CL.Typedtree.general_pattern * bool) * CL.Typedtree.expression *)
 
 val se_of_expr : CL.Typedtree.expression -> unit se * unit se
