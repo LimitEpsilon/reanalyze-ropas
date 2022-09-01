@@ -45,7 +45,7 @@ let rec resolve_path (path : CL.Path.t) =
 
 let resolve_to_be_resolved () =
   let resolve loc path =
-    try update_sc (val_of_loc loc) [resolve_path path]
+    try update_sc (val_of_loc loc) (resolve_path path)
     with _ ->
       if !Common.Cli.debug then (
         prerr_string "Look at : ";
@@ -56,7 +56,7 @@ let resolve_to_be_resolved () =
 
 let exn_of_file = Hashtbl.create 10
 
-let update_exn_of_file (key : string) (data : unit se list) =
+let update_exn_of_file (key : string) (data : unit se) =
   Hashtbl.add exn_of_file key data
 
 let connect_node_to_se loc v p =
@@ -129,7 +129,7 @@ let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
-    update_var id (Union v);
+    update_var id v;
     update_exn_of_file filename p;
     structure |> process_structure
   | _ -> ()

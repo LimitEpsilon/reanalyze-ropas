@@ -130,10 +130,8 @@ let rec print_se : unit se -> unit = function
   | Rel (rel, xs) ->
     Printf.eprintf "( %s ) " (string_of_relop rel);
     print_ses xs
-  | Union l ->
-    print_with_separator l "∪"
-  | Inter l ->
-    print_with_separator l "∩"
+  | Union l -> print_with_separator l "∪"
+  | Inter l -> print_with_separator l "∩"
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
@@ -164,7 +162,7 @@ and print_with_separator l sep =
       l' := tl
     | _ -> assert false
   done
-  
+
 (* let show_env_map (env_map : globalenv) = *)
 (*   Hashtbl.iter *)
 (*     (fun param loc_tagged_expr -> *)
@@ -186,4 +184,19 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_newline ())
     var_to_se
 
-let print_sc_info () = show_var_se_tbl var_to_se
+let show_sc_tbl (tbl : (unit se, SESet.t) Hashtbl.t) =
+  Hashtbl.iter
+    (fun key data ->
+      prerr_string "insensitive_sc :\n";
+      print_se key;
+      (match key with
+      | Fld (_, _) -> prerr_string " <- "
+      | _ -> prerr_string " = ");
+      let se_list = SESet.elements data in
+      print_se (Union se_list);
+      prerr_newline ())
+    tbl
+
+let print_sc_info () =
+  show_var_se_tbl var_to_se;
+  show_sc_tbl insensitive_sc
