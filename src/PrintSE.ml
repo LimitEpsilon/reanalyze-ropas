@@ -62,20 +62,11 @@ let print_tagged_expr : type k. k tagged_expr -> unit = function
 let rec print_se : unit se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Mem n ->
-    prerr_string "(Mem ";
-    prerr_int n;
-    prerr_string ")"
   | Fn (p, list) ->
     prerr_string "<";
     print_param p;
-    prerr_string "-> [";
-    List.iter
-      (fun e ->
-        print_expr e;
-        prerr_string ";")
-      list;
-    prerr_string "]>"
+    print_expr_list_with_separator list ";";
+    prerr_string ">"
   | Prim {prim_name} -> prerr_string ("Prim (" ^ prim_name ^ ")")
   | Var e ->
     prerr_string "X (";
@@ -84,33 +75,30 @@ let rec print_se : unit se -> unit = function
   | App_V (se, list) ->
     prerr_string "AppV (";
     print_se se;
-    prerr_string ", [";
-    List.iter
-      (fun o ->
-        (match o with None -> prerr_string " " | Some se -> print_se se);
-        prerr_string ";")
-      list;
-    prerr_string "])"
+    prerr_string ", ";
+    print_option_list_with_separator list ";";
+    prerr_string ")"
   | App_P (se, list) ->
     prerr_string "AppP (";
     print_se se;
-    prerr_string ", [";
-    List.iter
-      (fun o ->
-        (match o with None -> prerr_string " " | Some se -> print_se se);
-        prerr_string ";")
-      list;
-    prerr_string "])"
-  | Ctor (k, arr) ->
+    prerr_string ", ";
+    print_option_list_with_separator list ";";
+    prerr_string ")"
+  | Ctor (k, Some arr, plus_alpha) ->
     prerr_string "Con (";
     (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
-    prerr_string ", [";
-    Array.iter
-      (fun se ->
-        print_se se;
-        prerr_string ";")
-      arr;
-    prerr_string "])"
+    print_arr_with_separator arr ";";
+    (match plus_alpha with
+    | None -> ()
+    | Some plus_alpha -> prerr_string ("+α_" ^ string_of_int plus_alpha));
+    prerr_string ")"
+  | Ctor (k, None, plus_alpha) ->
+    prerr_string "Con (";
+    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
+    (match plus_alpha with
+    | None -> ()
+    | Some plus_alpha -> prerr_string ("α_" ^ string_of_int plus_alpha));
+    prerr_string ")"
   | Fld (se, lbl) ->
     prerr_string "Fld (";
     print_se se;
@@ -130,8 +118,8 @@ let rec print_se : unit se -> unit = function
   | Rel (rel, xs) ->
     Printf.eprintf "( %s ) " (string_of_relop rel);
     print_ses xs
-  | Union l -> print_with_separator l "∪"
-  | Inter l -> print_with_separator l "∩"
+  | Union l -> print_se_list_with_separator l "∪"
+  | Inter l -> print_se_list_with_separator l "∩"
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
@@ -150,8 +138,9 @@ and print_ses (xs : unit se list) =
   List.iter print_se xs;
   prerr_string "]"
 
-and print_with_separator l sep =
+and print_se_list_with_separator l sep =
   let l' = ref l in
+  prerr_string "[";
   while !l' != [] do
     match !l' with
     | hd :: tl ->
@@ -161,7 +150,54 @@ and print_with_separator l sep =
       if tl != [] then prerr_string sep;
       l' := tl
     | _ -> assert false
-  done
+  done;
+  prerr_string "]"
+
+and print_expr_list_with_separator l sep =
+  let l' = ref l in
+  prerr_string "[";
+  while !l' != [] do
+    match !l' with
+    | hd :: tl ->
+      prerr_string "(";
+      print_expr hd;
+      prerr_string ")";
+      if tl != [] then prerr_string sep;
+      l' := tl
+    | _ -> assert false
+  done;
+  prerr_string "]"
+
+and print_option_list_with_separator l sep =
+  let l' = ref l in
+  prerr_string "[";
+  while !l' != [] do
+    match !l' with
+    | Some hd :: tl ->
+      prerr_string "(";
+      print_se hd;
+      prerr_string ")";
+      if tl != [] then prerr_string sep;
+      l' := tl
+    | None :: tl ->
+      if tl != [] then prerr_string sep;
+      l' := tl
+    | _ -> assert false
+  done;
+  prerr_string "]"
+
+and print_arr_with_separator arr sep =
+  let len = Array.length arr in
+  let i = ref 0 in
+  prerr_string "[";
+  while !i < len do
+    prerr_string "(";
+    print_se arr.(!i);
+    prerr_string ")";
+    if !i < len - 1 then prerr_string sep;
+    incr i
+  done;
+  prerr_string "]"
 
 (* let show_env_map (env_map : globalenv) = *)
 (*   Hashtbl.iter *)
