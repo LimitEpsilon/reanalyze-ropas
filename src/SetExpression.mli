@@ -41,12 +41,12 @@ and arithop =
 and relop = GEN of rel
 
 and _ se =
-  | Top : 'b se
-  | Const : CL.Asttypes.constant -> 'c se
-  | Prim : CL.Primitive.description -> 'd se
+  | Top : _ se
+  | Const : CL.Asttypes.constant -> _ se
+  | Prim : CL.Primitive.description -> _ se
   | Fn : param * code_loc expr list -> unit se
   | Closure : param * code_loc expr list * env -> env se
-  | Var : 'e tagged_expr -> unit se
+  | Var : _ tagged_expr -> unit se
   | Var_sigma : code_loc tagged_expr * env -> env se
   | App_V : 'a se * 'a arg -> 'a se
   | App_P : 'a se * 'a arg -> 'a se
@@ -81,16 +81,10 @@ and rule =
   | `VAR
   | `WHILE ]
 
-val address : int ref
-val new_memory : unit -> int
+(* val address : int ref *)
+(* val new_memory : unit -> int *)
 
-module SE : sig
-  type t = unit se
-
-  val compare : 'a -> 'a -> int
-end
-
-module SESet : Set.S with type elt = SE.t
+module SESet : Set.S with type elt = unit se
 
 val insensitive_sc : (unit se, SESet.t) Hashtbl.t
 val sensitive_sc : (env se, env se list) Hashtbl.t
