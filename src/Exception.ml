@@ -1,23 +1,24 @@
 [%%import "../config.h"]
 
+open CL
 open SetExpression
 
-let isApply : CL.Types.value_description -> bool = function
+let isApply : Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%apply"}} -> true
   | _ -> false
 
-let isRevapply : CL.Types.value_description -> bool = function
+let isRevapply : Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
   | _ -> false
 
-let string_of_prim : CL.Types.value_description -> string = function
+let string_of_prim : Types.value_description -> string = function
   | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
     Printf.sprintf "%s->%S" s1 s2
   | _ -> ""
 
 let print_prim v = prerr_string @@ string_of_prim v ^ "\n"
 
-let isRaise : CL.Types.value_description -> bool = function
+let isRaise : Types.value_description -> bool = function
   | {
       val_kind =
         Val_prim
@@ -29,7 +30,7 @@ let isRaise : CL.Types.value_description -> bool = function
     true (* do not consider second argument for raise_with_backtrace *)
   | _ -> false
 
-let rec resolve_path (path : CL.Path.t) =
+let rec resolve_path (path : Path.t) =
   match path with
   | Pident x -> se_of_var x
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
@@ -49,7 +50,7 @@ let resolve_to_be_resolved () =
     with _ ->
       if !Common.Cli.debug then (
         prerr_string "Look at : ";
-        CL.Location.print_loc Format.str_formatter loc;
+        Location.print_loc Format.str_formatter loc;
         prerr_string (Format.flush_str_formatter () ^ "\n"))
   in
   Hashtbl.iter resolve to_be_resolved
@@ -66,11 +67,11 @@ let connect_node_to_se loc v p =
   update_sc exn p
 
 (* module A = struct
-  let x = 1 (* se_of_struct_item : X("x=1"의 location), se_of_vb : Ctor(x, 1) *)
-  (* connect_node_to_se : 
-     X("let x = 1"의 location) = X("x=1"의 location),
-     X("x=1"의 location) = Ctor(x, 1) *)
-end *)
+     let x = 1 (* se_of_struct_item : X("x=1"의 location), se_of_vb : Ctor(x, 1) *)
+     (* connect_node_to_se :
+        X("let x = 1"의 location) = X("x=1"의 location),
+        X("x=1"의 location) = Ctor(x, 1) *)
+   end *)
 
 (*
 let a = ref 0
@@ -81,47 +82,45 @@ let () = incr (f ()) (* a <- 1 | b <- 1 *) (* {a} <- 1, {a, b} <- 1 => {a <-1 , 
 let c = !a
 *)
 let traverse_ast () =
-  let super = CL.Tast_mapper.default in
-  let expr (self : CL.Tast_mapper.mapper) (expr : CL.Typedtree.expression) =
+  let super = Tast_mapper.default in
+  let expr (self : Tast_mapper.mapper) (expr : Typedtree.expression) =
     let v, p = se_of_expr expr in
     (* first compute v, p for the AST node *)
     connect_node_to_se expr.exp_loc v p;
     (* then update set constraints *)
     super.expr self expr (* then recurse! *)
   in
-  let structure_item (self : CL.Tast_mapper.mapper)
-      (struct_item : CL.Typedtree.structure_item) =
+  let structure_item (self : Tast_mapper.mapper)
+      (struct_item : Typedtree.structure_item) =
     let v, p = se_of_struct_item struct_item in
     connect_node_to_se struct_item.str_loc v p;
     super.structure_item self struct_item
   in
-  let value_binding (self : CL.Tast_mapper.mapper)
-      (vb : CL.Typedtree.value_binding) =
+  let value_binding (self : Tast_mapper.mapper) (vb : Typedtree.value_binding) =
     let v, p = se_of_vb vb in
     connect_node_to_se vb.vb_loc v p;
     super.value_binding self vb
   in
-  let module_binding (self : CL.Tast_mapper.mapper)
-      (mb : CL.Typedtree.module_binding) =
+  let module_binding (self : Tast_mapper.mapper) (mb : Typedtree.module_binding)
+      =
     let v, p = se_of_mb mb in
     connect_node_to_se mb.mb_loc v p;
     super.module_binding self mb
   in
-  let module_expr (self : CL.Tast_mapper.mapper) (me : CL.Typedtree.module_expr)
-      =
+  let module_expr (self : Tast_mapper.mapper) (me : Typedtree.module_expr) =
     let v, p = se_of_module_expr me in
     connect_node_to_se me.mod_loc v p;
     super.module_expr self me
   in
-  let open CL.Tast_mapper in
+  let open Tast_mapper in
   {super with expr; value_binding; structure_item; module_binding; module_expr}
 
-let process_structure (structure : CL.Typedtree.structure) =
+let process_structure (structure : Typedtree.structure) =
   let traverse_ast = traverse_ast () in
   structure |> traverse_ast.structure traverse_ast |> ignore
 
-let processCmt (cmt_infos : CL.Cmt_format.cmt_infos) =
-  let id = CL.Ident.create_persistent cmt_infos.cmt_modname in
+let processCmt (cmt_infos : Cmt_format.cmt_infos) =
+  let id = Ident.create_persistent cmt_infos.cmt_modname in
   let filename =
     match cmt_infos.cmt_sourcefile with None -> "" | Some s -> s
   in

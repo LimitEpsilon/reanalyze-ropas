@@ -11,40 +11,39 @@ and _ tagged_expr =
 
 and env = Env_var | Env of (param * code_loc tagged_expr) list
 
-(* construct : Types.cstr_name, Some Types.cstr_loc *)
-(* variant : Asttypes.label *)
 and ctor = (string * code_loc option) option
+(** construct : Types.cstr_name, Some Types.cstr_loc
+    polymorphic_variant : Asttypes.label, None
+    module : Ident.t.name, None *)
 
-(* construct : need to know arity *)
-(* record : translate field name to position(int, starts from 0) *)
 and 'a fld = ctor * 'a se
+(** record : translate field name to position (int, starts from 0) *)
 
-(* CL.Types.value_description.value_kind | Val_prim of {prim_name : string ;} *)
 and arith =
   | ADD
   | SUB
   | DIV
   | MUL
   | NEG
-  | ABS (* absolute value *)
+  | ABS  (** absolute value *)
   | MOD
   | AND
   | OR
   | NOT
   | XOR
-  | LSL (* <<, logical *)
-  | LSR (* >>, logical *)
-  | ASR (* >>, arithmetic sign extension *)
-  | SUCC (* ++x *)
-  | PRED (* --x *)
+  | LSL  (** <<, logical *)
+  | LSR  (** >>, logical *)
+  | ASR  (** >>, arithmetic sign extension *)
+  | SUCC  (** ++x *)
+  | PRED  (** --x *)
 
 and rel =
-  | EQ (* == *)
-  | NE (* != *)
-  | LT (* < *)
-  | LE (* <= *)
-  | GT (* > *)
-  | GE (* >= *)
+  | EQ  (** == *)
+  | NE  (** != *)
+  | LT  (** < *)
+  | LE  (** <= *)
+  | GT  (** > *)
+  | GE  (** >= *)
 
 and arithop =
   | INT of arith
@@ -55,40 +54,35 @@ and arithop =
 
 and relop = GEN of rel
 
-(* set expression type *)
+(** set expression type *)
 and _ se =
-  | Top : _ se (* _ *)
+  | Top : _ se  (** _ *)
   | Const : CL.Asttypes.constant -> _ se
-  | Prim :
-      CL.Primitive.description
-      -> _ se (* primitives, later converted to arith/rel/fld/mem *)
-  | Fn : param * code_loc expr list -> unit se (* context-insensitive *)
-  | Closure :
-      param * code_loc expr list * env
-      -> env se (* lambda (p->e)+ / lazy when param = nil *)
-  | Var : _ tagged_expr -> unit se (* set variable, context-insensitive *)
-  | Var_sigma : code_loc tagged_expr * env -> env se (* set variable *)
-  | App_V : 'a se * 'a arg -> 'a se (* possible values / force when arg = nil *)
-  | App_P :
-      'a se * 'a arg
-      -> 'a se (* possible exn packets / force when arg = nil *)
-  | Ctor :
-      ctor * 'a se array option * int option
-      -> 'a se (* construct / record field *)
-  (* Ctor (Some (string, Some location), Some array, Some address) = *)
-  (* construct with constructor of name "string" which is defined at "location" *)
-  (* Has fields with fixed length "array", with possible extra allocations stored at "address" *)
-  | Fld : 'a se * 'a fld -> 'a se (* field of a record / deconstruct *)
-  | Arith : arithop * 'a se list -> 'a se (* arithmetic operators *)
-  | Rel : relop * 'a se list -> 'a se (* relation operators *)
-  | Union : 'a se list -> 'a se (* union *)
-  | Inter : 'a se list -> 'a se (* intersection *)
-  | Diff : 'a se * 'a se -> 'a se (* difference *)
-  | Cond : 'a se * 'a se -> 'a se (* conditional set expression *)
+  | Prim : CL.Primitive.description -> _ se
+      (** primitives, later converted to arith/rel/fld/mem *)
+  | Fn : param * code_loc expr list -> unit se  (** context-insensitive *)
+  | Closure : param * code_loc expr list * env -> env se
+      (** lambda (p->e)+ / lazy when param = nil *)
+  | Var : _ tagged_expr -> unit se  (** set variable, context-insensitive *)
+  | Var_sigma : code_loc tagged_expr * env -> env se  (** set variable *)
+  | App_V : 'a se * 'a arg -> 'a se
+      (** possible values / force when arg = nil *)
+  | App_P : 'a se * 'a arg -> 'a se
+      (** possible exn packets / force when arg = nil *)
+  | Ctor : ctor * 'a se array option * int option -> 'a se
+      (** construct / record field
+          Ctor(κ, [...], α : abstract address)
+          Ctor (Some (string, Some location), Some array, Some address) =
+          construct with constructor of name "string" which is defined at "location"
+          Has fields with fixed length "array", with possible extra allocations stored at "address" *)
+  | Fld : 'a se * 'a fld -> 'a se  (** field of a record / deconstruct *)
+  | Arith : arithop * 'a se list -> 'a se  (** arithmetic operators *)
+  | Rel : relop * 'a se list -> 'a se  (** relation operators *)
+  | Union : 'a se list -> 'a se  (** union *)
+  | Inter : 'a se list -> 'a se  (** intersection *)
+  | Diff : 'a se * 'a se -> 'a se  (** difference *)
+  | Cond : 'a se * 'a se -> 'a se  (** conditional set expression *)
 
-(* divide_by_zero : check denominator, if constant check if zero.          *)
-(*                : if identifier look up in var_to_se to check if constant*)
-(*                : if constant check if zero, else mark might_raise       *)
 and rule =
   [ `APP
   | `FORCE
@@ -110,6 +104,10 @@ and rule =
   | `RAISE
   | `FOR
   | `WHILE ]
+
+(* divide_by_zero : check denominator, if constant check if zero.
+                  : if identifier look up in var_to_se to check if constant
+                  : if constant check if zero, else mark might_raise *)
 
 let address = ref 0
 
@@ -239,6 +237,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
   in
   (* update the table while traversing the pattern *)
   let rec solve_eq (pat : CL.Typedtree.pattern) se =
+    (* Does not return its set expression, as it does not require screening *)
     match pat.pat_desc with
     | Tpat_any | Tpat_constant _ -> ()
     | Tpat_var (x, _) ->
@@ -443,6 +442,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     done;
     Ctor (constructor, Some (list_rev_to_array !args Top), None)
   and solve_rec len se list =
+    (* Solve `list = se` and return the set expression of the list
+       For example, `list [x, y, z] = se` should return [T, T, T] and
+       `list [x, 1, true] = se` should return [T, 1, true] *)
     let l = ref list in
     let args = ref [] in
     let cursor = ref 0 in
@@ -453,16 +455,16 @@ let se_of_expr (expr : CL.Typedtree.expression) =
         let ith_se = solve_eq p (Fld (se, (None, se_of_int i))) in
         while !cursor < i do
           args := Top :: !args;
-          cursor := !cursor + 1
+          incr cursor
         done;
         args := ith_se :: !args;
-        cursor := !cursor + 1;
+        incr cursor;
         l := tl
       | _ -> assert false
     done;
     while !cursor < len do
       args := Top :: !args;
-      cursor := !cursor + 1
+      incr cursor
     done;
     Ctor (None, Some (list_rev_to_array !args Top), None)
   in
