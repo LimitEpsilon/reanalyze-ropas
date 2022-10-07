@@ -30,19 +30,21 @@ let string_of_relop : relop -> string = function
     | GT -> ">"
     | GE -> ">=")
 
-let print_loc loc =
-  CL.Location.print_loc Format.str_formatter loc;
-  prerr_string (Format.flush_str_formatter ())
+let print_loc = function
+  | Alive loc ->
+    CL.Location.print_loc Format.str_formatter loc;
+    prerr_string (Format.flush_str_formatter ())
+  | Expr_ghost _ -> prerr_string "ghost_expr"
+  | Mod_ghost _ -> prerr_string "ghost_module"
 
-let print_param par =
-  prerr_string "[";
-  List.iter print_loc par;
-  prerr_string "]"
+let print_param = function
+  | None -> ()
+  | Some x -> prerr_string (CL.Ident.name x)
 
 let print_expr : type k. k expr -> unit = function
   | Expr_var p ->
     prerr_string "Expr_var (";
-    print_param p;
+    prerr_string (CL.Ident.name p);
     prerr_string ")"
   | Expr loc ->
     prerr_string "Expr (";
@@ -59,7 +61,7 @@ let print_tagged_expr : type k. k tagged_expr -> unit = function
     print_expr p;
     prerr_string ")"
 
-let rec print_se : unit se -> unit = function
+let rec print_se : value se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
   | Fn (p, list) ->
@@ -84,33 +86,30 @@ let rec print_se : unit se -> unit = function
     prerr_string ", ";
     print_option_list_with_separator list ";";
     prerr_string ")"
-  | Ctor (k, Some arr, plus_alpha) ->
-    prerr_string "Con (";
+  | Ctor (k, Static arr) ->
+    prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
     print_arr_with_separator arr ";";
-    (match plus_alpha with
-    | None -> ()
-    | Some plus_alpha -> prerr_string ("+α_" ^ string_of_int plus_alpha));
     prerr_string ")"
-  | Ctor (k, None, plus_alpha) ->
-    prerr_string "Con (";
+  | Ctor (k, Dynamic i) ->
+    prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
-    (match plus_alpha with
-    | None -> ()
-    | Some plus_alpha -> prerr_string ("α_" ^ string_of_int plus_alpha));
+    prerr_string "malloc ";
+    prerr_string (string_of_int i);
     prerr_string ")"
   | Fld (se, lbl) ->
     prerr_string "Fld (";
     print_se se;
     prerr_string ", (";
     (match lbl with
-    | None, x ->
+    | None, Some i ->
       prerr_string " , ";
-      print_se x
-    | Some (s, _), x ->
+      prerr_int i
+    | Some (s, _), Some i ->
       prerr_string s;
       prerr_string ", ";
-      print_se x);
+      prerr_int i
+    | _, None -> prerr_string " , ");
     prerr_string "))"
   | Arith (op, xs) ->
     Printf.eprintf "( %s ) " (string_of_arithop op);
@@ -118,22 +117,29 @@ let rec print_se : unit se -> unit = function
   | Rel (rel, xs) ->
     Printf.eprintf "( %s ) " (string_of_relop rel);
     print_ses xs
-  | Union l -> print_se_list_with_separator l "∪"
-  | Inter l -> print_se_list_with_separator l "∩"
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
     prerr_string ")-(";
-    print_se y;
+    print_pattern y;
     prerr_string ")"
-  | Cond (x, y) ->
-    prerr_string "if (";
-    print_se x;
-    prerr_string ")=∅ then (";
-    print_se y;
-    prerr_string ") else ∅"
 
-and print_ses (xs : unit se list) =
+and print_pattern : pattern se -> unit = function
+  | Top -> prerr_string "⊤"
+  | Const c -> prerr_string (CL.Printpat.pretty_const c)
+  | Fn (p, list) ->
+    prerr_string "<";
+    print_param p;
+    print_expr_list_with_separator list ";";
+    prerr_string ">"
+  | Ctor_pat (k, arr) ->
+    prerr_string "Ctor (";
+    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
+    Array.iter (fun p -> print_pattern p; prerr_string "; ") arr;
+    prerr_string ")"
+  | Loc i -> prerr_int i
+
+and print_ses (xs : value se list) =
   prerr_string "[";
   List.iter print_se xs;
   prerr_string "]"
@@ -192,7 +198,7 @@ and print_arr_with_separator arr sep =
   prerr_string "[";
   while !i < len do
     prerr_string "(";
-    print_se arr.(!i);
+    print_int arr.(!i);
     prerr_string ")";
     if !i < len - 1 then prerr_string sep;
     incr i
@@ -216,11 +222,11 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string (CL.Ident.unique_name x);
       prerr_string "\n se = ";
       let se_list = SESet.elements se in
-      print_se (union_of_list se_list);
+      List.iter print_se se_list;
       prerr_newline ())
     var_to_se
 
-let show_sc_tbl (tbl : (unit se, SESet.t) Hashtbl.t) =
+let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
       prerr_string "insensitive_sc :\n";
@@ -229,10 +235,10 @@ let show_sc_tbl (tbl : (unit se, SESet.t) Hashtbl.t) =
       | Fld (_, _) -> prerr_string " <- "
       | _ -> prerr_string " = ");
       let se_list = SESet.elements data in
-      print_se (Union se_list);
+      List.iter print_se se_list;
       prerr_newline ())
     tbl
 
 let print_sc_info () =
   show_var_se_tbl var_to_se;
-  show_sc_tbl insensitive_sc
+  show_sc_tbl sc

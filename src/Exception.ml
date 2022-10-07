@@ -35,20 +35,30 @@ let rec resolve_path (path : Path.t) =
   | Pident x -> se_of_var x
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let m = resolve_path m in
-    Fld (m, (Some (x, None), se_of_int 0))
+    List.map (fun m -> Fld (m, (Some (x, None), Some 0))) m
   | ((Pdot (m, x)) [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let m = resolve_path m in
-    Fld (m, (Some (x, None), se_of_int 0))
+    List.map (fun m -> Fld (m, (Some (x, None), Some 0))) m
   | Papply (f, x) ->
+    let f_temp = Var (Val (new_temp_var ())) in
+    let x_temp = Var (Val (new_temp_var ())) in
     let f = resolve_path f in
     let x = resolve_path x in
-    App_V (f, [Some x])
+    update_sc f_temp f;
+    update_sc x_temp x;
+    [App_V (f_temp, [Some x_temp])]
 
 let resolve_to_be_resolved () =
   let resolve loc path =
-    try update_sc (val_of_loc loc) (resolve_path path)
+    try update_sc (Var (Val (Expr loc))) (resolve_path path)
     with _ ->
       if !Common.Cli.debug then (
+        let loc =
+          match loc with
+          | Alive l -> l
+          | Expr_ghost e -> e.exp_loc
+          | Mod_ghost m -> m.mod_loc
+        in
         prerr_string "Look at : ";
         Location.print_loc Format.str_formatter loc;
         prerr_string (Format.flush_str_formatter () ^ "\n"))
@@ -57,63 +67,27 @@ let resolve_to_be_resolved () =
 
 let exn_of_file = Hashtbl.create 10
 
-let update_exn_of_file (key : string) (data : unit se) =
+let update_exn_of_file (key : string) (data : value se list) =
   Hashtbl.add exn_of_file key data
 
-let connect_node_to_se loc v p =
-  let value = val_of_loc loc in
-  let exn = packet_of_loc loc in
-  update_sc value v;
-  update_sc exn p
-
-(* module A = struct
-     let x = 1 (* se_of_struct_item : X("x=1"의 location), se_of_vb : Ctor(x, 1) *)
-     (* connect_node_to_se :
-        X("let x = 1"의 location) = X("x=1"의 location),
-        X("x=1"의 location) = Ctor(x, 1) *)
-   end *)
-
-(*
-let a = ref 0
-let b = ref 1
-let f () = match input with | 1 -> a | _ -> b
-{a, b} - {c,d} {a-c,a-d, b-c,b-d}
-let () = incr (f ()) (* a <- 1 | b <- 1 *) (* {a} <- 1, {a, b} <- 1 => {a <-1 , b <- 1} {a <- 1, b <- 1} *)
-let c = !a
-*)
 let traverse_ast () =
   let super = Tast_mapper.default in
   let expr (self : Tast_mapper.mapper) (expr : Typedtree.expression) =
     let v, p = se_of_expr expr in
     (* first compute v, p for the AST node *)
-    connect_node_to_se expr.exp_loc v p;
+    update_sc (val_of_expr expr) v;
+    update_sc (packet_of_expr expr) p;
     (* then update set constraints *)
     super.expr self expr (* then recurse! *)
   in
-  let structure_item (self : Tast_mapper.mapper)
-      (struct_item : Typedtree.structure_item) =
-    let v, p = se_of_struct_item struct_item in
-    connect_node_to_se struct_item.str_loc v p;
-    super.structure_item self struct_item
-  in
-  let value_binding (self : Tast_mapper.mapper) (vb : Typedtree.value_binding) =
-    let v, p = se_of_vb vb in
-    connect_node_to_se vb.vb_loc v p;
-    super.value_binding self vb
-  in
-  let module_binding (self : Tast_mapper.mapper) (mb : Typedtree.module_binding)
-      =
-    let v, p = se_of_mb mb in
-    connect_node_to_se mb.mb_loc v p;
-    super.module_binding self mb
-  in
   let module_expr (self : Tast_mapper.mapper) (me : Typedtree.module_expr) =
     let v, p = se_of_module_expr me in
-    connect_node_to_se me.mod_loc v p;
+    update_sc (val_of_mod me) v;
+    update_sc (packet_of_mod me) p;
     super.module_expr self me
   in
   let open Tast_mapper in
-  {super with expr; value_binding; structure_item; module_binding; module_expr}
+  {super with expr; module_expr}
 
 let process_structure (structure : Typedtree.structure) =
   let traverse_ast = traverse_ast () in

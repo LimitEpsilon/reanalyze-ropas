@@ -1,23 +1,35 @@
 [%%import "../config.h"]
 
-type code_loc = CL.Location.t
-and param = code_loc list
-and 'a arg = 'a se option list
-and _ expr = Expr_var : param -> param expr | Expr : code_loc -> code_loc expr
+type code_loc =
+  | Alive of CL.Location.t
+  | Expr_ghost of CL.Typedtree.expression
+  | Mod_ghost of CL.Typedtree.module_expr
+
+and param = CL.Ident.t option (* use Texp_function's param *)
+and arg = value se option list
+
+and _ expr =
+  | Expr_var : CL.Ident.t -> param expr
+  | Expr : code_loc -> code_loc expr
+
+and arr =
+  | Static of int array
+      (** statically allocated arrays such as records, variants, or tuples *)
+  | Dynamic of int
+      (** dynamically allocated array, decoded from the Prim set expression *)
 
 and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
   | Packet : 'a expr -> 'a tagged_expr
 
-and env = Env_var | Env of (param * code_loc tagged_expr) list
-
-and ctor = (string * code_loc option) option
+and ctor = (string * CL.Location.t option) option
 (** construct : Types.cstr_name, Some Types.cstr_loc
-    polymorphic_variant : Asttypes.label, None
-    module : Ident.t.name, None *)
+    polymorphic_variant : Asttypes.label, None *)
 
-and 'a fld = ctor * 'a se
-(** record : translate field name to position (int, starts from 0) *)
+and fld = ctor * int option
+(** i-th field of a variant : (Some κ, Some i)
+    i-th field of a record : (None, Some i)
+    dynamic access through the Array.get primitive : (None, None) *)
 
 and arith =
   | ADD
@@ -53,98 +65,79 @@ and arithop =
   | NATURALINT of arith
 
 and relop = GEN of rel
+and pattern
+(* phantom type for pattern screening *)
+
+and value
 
 (** set expression type *)
 and _ se =
   | Top : _ se  (** _ *)
   | Const : CL.Asttypes.constant -> _ se
-  | Prim : CL.Primitive.description -> _ se
+  | Prim : CL.Primitive.description -> value se
       (** primitives, later converted to arith/rel/fld/mem *)
-  | Fn : param * code_loc expr list -> unit se  (** context-insensitive *)
-  | Closure : param * code_loc expr list * env -> env se
-      (** lambda (p->e)+ / lazy when param = nil *)
-  | Var : _ tagged_expr -> unit se  (** set variable, context-insensitive *)
-  | Var_sigma : code_loc tagged_expr * env -> env se  (** set variable *)
-  | App_V : 'a se * 'a arg -> 'a se
-      (** possible values / force when arg = nil *)
-  | App_P : 'a se * 'a arg -> 'a se
-      (** possible exn packets / force when arg = nil *)
-  | Ctor : ctor * 'a se array option * int option -> 'a se
-      (** construct / record field
-          Ctor(κ, [...], α : abstract address)
-          Ctor (Some (string, Some location), Some array, Some address) =
-          construct with constructor of name "string" which is defined at "location"
-          Has fields with fixed length "array", with possible extra allocations stored at "address" *)
-  | Fld : 'a se * 'a fld -> 'a se  (** field of a record / deconstruct *)
-  | Arith : arithop * 'a se list -> 'a se  (** arithmetic operators *)
-  | Rel : relop * 'a se list -> 'a se  (** relation operators *)
-  | Union : 'a se list -> 'a se  (** union *)
-  | Inter : 'a se list -> 'a se  (** intersection *)
-  | Diff : 'a se * 'a se -> 'a se  (** difference *)
-  | Cond : 'a se * 'a se -> 'a se  (** conditional set expression *)
-
-and rule =
-  [ `APP
-  | `FORCE
-  | `IGNORE
-  | `IDENTITY
-  | `ARITH
-  | `REL
-  | `EXTERN
-  | `FN
-  | `VAR
-  | `LET
-  | `OP
-  | `CON
-  | `FIELD
-  | `SETFIELD
-  | `SEQ
-  | `CASE
-  | `HANDLE
-  | `RAISE
-  | `FOR
-  | `WHILE ]
+  | Fn : param * code_loc expr list -> _ se  (** lambda expression *)
+  | Var : _ tagged_expr -> value se  (** set variable *)
+  | App_V : value se * arg -> value se
+      (** possible values / force when arg = nil / prim_v when lhs is Prim *)
+  | App_P : value se * arg -> value se
+      (** possible exn packets / force when arg = nil / prim_p when lhs is Prim *)
+  | Ctor : ctor * arr -> value se  (** One ADT to rule them all :D *)
+  | Ctor_pat : ctor * pattern se array -> pattern se
+      (** For pattern screening *)
+  | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
+  | Arith : arithop * value se list -> value se  (** arithmetic operators *)
+  | Rel : relop * value se list -> value se  (** relation operators *)
+  | Diff : value se * pattern se -> value se  (** screening *)
+  | Loc : int -> pattern se
 
 (* divide_by_zero : check denominator, if constant check if zero.
                   : if identifier look up in var_to_se to check if constant
                   : if constant check if zero, else mark might_raise *)
 
+let temp_variable_label = ref 0
+
+let new_temp_var () =
+  let temp = !temp_variable_label in
+  let temp_id = CL.Ident.create_persistent ("__temp" ^ string_of_int temp) in
+  incr temp_variable_label;
+  Expr_var temp_id
+
 let address = ref 0
 
 let new_memory () =
   let mem = !address in
-  address := !address + 1;
+  incr address;
   mem
 
+let new_array size =
+  let arr = Array.make size () in
+  Array.map new_memory arr
+
 module SE = struct
-  type t = unit se
+  type t = value se
 
   let compare = compare
 end
 
 module SESet = Set.Make (SE)
 
-let insensitive_sc : (unit se, SESet.t) Hashtbl.t = Hashtbl.create 256
-let sensitive_sc : (env se, env se list) Hashtbl.t = Hashtbl.create 256
+let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_sc key data =
-  let set =
-    match data with Union l -> SESet.of_list l | se -> SESet.singleton se
-  in
-  if Hashtbl.mem insensitive_sc key then (
-    let original = Hashtbl.find insensitive_sc key in
-    Hashtbl.remove insensitive_sc key;
-    Hashtbl.add insensitive_sc key (SESet.union original set))
-  else Hashtbl.add insensitive_sc key set
+  let set = SESet.of_list data in
+  if Hashtbl.mem sc key then (
+    let original = Hashtbl.find sc key in
+    Hashtbl.remove sc key;
+    Hashtbl.add sc key (SESet.union original set))
+  else Hashtbl.add sc key set
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
 let var_to_se : var_se_tbl = Hashtbl.create 256
 
 let update_var key data =
-  let set =
-    match data with Union l -> SESet.of_list l | se -> SESet.singleton se
-  in
+  let set = SESet.of_list data in
   if Hashtbl.mem var_to_se key then (
     let original = Hashtbl.find var_to_se key in
     Hashtbl.remove var_to_se key;
@@ -155,44 +148,49 @@ type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
 
 let to_be_resolved : to_be_resolved = Hashtbl.create 256
 let update_to_be key data = Hashtbl.add to_be_resolved key data
+let mem : (int, SESet.t) Hashtbl.t = Hashtbl.create 256
 
-let union_of_list l =
-  let for_each_se acc se =
-    match se with Union l -> List.rev_append l acc | se -> se :: acc
-  in
-  Union (List.fold_left for_each_se [] l)
+let update_mem key data =
+  let set = SESet.of_list data in
+  if Hashtbl.mem mem key then (
+    let original = Hashtbl.find mem key in
+    Hashtbl.remove mem key;
+    Hashtbl.add mem key (SESet.union original set))
+  else Hashtbl.add mem key set
 
-let list_rev_to_array l init =
+let list_rev_to_array l =
   let len = List.length l in
-  let arr = Array.make len init in
-  let i = ref (len - 1) in
-  let l = ref l in
-  while !l != [] do
-    match !l with
-    | hd :: tl ->
-      arr.(!i) <- hd;
-      decr i;
-      l := tl
-    | _ -> assert false
-  done;
-  arr
+  if len = 0 then [||]
+  else
+    let arr = Array.make len (List.hd l) in
+    let i = ref (len - 1) in
+    let l = ref l in
+    while !l != [] do
+      match !l with
+      | hd :: tl ->
+        arr.(!i) <- hd;
+        decr i;
+        l := tl
+      | _ -> assert false
+    done;
+    arr
 
-let list_to_array l init =
+let list_to_array l =
   let len = List.length l in
-  let arr = Array.make len init in
-  let i = ref 0 in
-  let l = ref l in
-  while !l != [] do
-    match !l with
-    | hd :: tl ->
-      arr.(!i) <- hd;
-      incr i;
-      l := tl
-    | _ -> assert false
-  done;
-  arr
-
-let se_of_int n = Const (CL.Asttypes.Const_int n)
+  if len = 0 then [||]
+  else
+    let arr = Array.make len (List.hd l) in
+    let i = ref 0 in
+    let l = ref l in
+    while !l != [] do
+      match !l with
+      | hd :: tl ->
+        arr.(!i) <- hd;
+        incr i;
+        l := tl
+      | _ -> assert false
+    done;
+    arr
 
 let se_of_var x =
   let se_list =
@@ -203,30 +201,44 @@ let se_of_var x =
           ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
       raise err
   in
-  union_of_list se_list
+  se_list
 
-let val_of_loc loc = Var (Val (Expr loc))
-let packet_of_loc loc = Var (Packet (Expr loc))
+let loc_of_mod ({CL.Typedtree.mod_loc} as mod_expr) =
+  if mod_loc.loc_ghost then Mod_ghost mod_expr else Alive mod_loc
+
+let expr_of_mod me = Expr (loc_of_mod me)
+let val_of_mod me = Var (Val (expr_of_mod me))
+let packet_of_mod me = Var (Packet (expr_of_mod me))
+
+let loc_of_expr ({CL.Typedtree.exp_loc} as expr) =
+  if exp_loc.loc_ghost then Expr_ghost expr else Alive exp_loc
+
+let expr_of_expr e = Expr (loc_of_expr e)
+let val_of_expr e = Var (Val (expr_of_expr e))
+let packet_of_expr e = Var (Packet (expr_of_expr e))
 
 (** se_of_something returns (value_of_something, packet_of_something) *)
 
 (** The "value" of a binding is the union of all the "constructs" that are tagged with the bound names *)
 let se_of_mb (mb : CL.Typedtree.module_binding) =
   match mb with
-  | ({mb_id = Some id; mb_expr = {mod_loc}}
+  | ({mb_id = Some id; mb_expr}
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    update_var id (val_of_loc mod_loc);
-    ( Ctor (Some (CL.Ident.name id, None), Some [|val_of_loc mod_loc|], None),
-      packet_of_loc mod_loc )
-  | ({mb_id; mb_expr = {mod_loc}}
-  [@if ocaml_version < (4, 10, 0) || defined npm]) ->
-    update_var mb_id (val_of_loc mod_loc);
-    ( Ctor (Some (CL.Ident.name mb_id, None), Some [|val_of_loc mod_loc|], None),
-      packet_of_loc mod_loc )
-  | {mb_expr = {mod_loc}} -> (Union [], packet_of_loc mod_loc)
+    let mem = new_memory () in
+    update_var id [val_of_mod mb_expr];
+    update_mem mem [val_of_mod mb_expr];
+    ( [Ctor (Some (CL.Ident.name id, Some mb.mb_loc), Static [|mem|])],
+      [packet_of_mod mb_expr] )
+  | ({mb_id; mb_expr} [@if ocaml_version < (4, 10, 0) || defined npm]) ->
+    let mem = new_memory () in
+    update_var mb_id [val_of_mod mb_expr];
+    update_mem mem [val_of_mod mb_expr];
+    ( [Ctor (Some (CL.Ident.name mb_id, None), Static [|mem|])],
+      [packet_of_mod mb_expr] )
+  | {mb_expr} -> ([], [packet_of_mod mb_expr])
 
 let se_of_vb (vb : CL.Typedtree.value_binding) =
-  let local_binding : (string, unit se list) Hashtbl.t = Hashtbl.create 10 in
+  let local_binding : (string, value se list) Hashtbl.t = Hashtbl.create 10 in
   (* update the table *)
   let update_tbl key data =
     if Hashtbl.mem local_binding key then (
@@ -241,10 +253,10 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
     match pat.pat_desc with
     | Tpat_any | Tpat_constant _ -> ()
     | Tpat_var (x, _) ->
-      update_var x se;
+      update_var x [se];
       update_tbl (CL.Ident.name x) se
     | Tpat_alias (p, a, _) ->
-      update_var a se;
+      update_var a [se];
       update_tbl (CL.Ident.name a) se;
       solve_eq p se
     | Tpat_tuple list -> solve_ctor None se list
@@ -258,7 +270,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
       let constructor = Some (lbl, None) in
       match p_o with
       | None -> ()
-      | Some p -> solve_eq p (Fld (se, (constructor, se_of_int 0))))
+      | Some p -> solve_eq p (Fld (se, (constructor, Some 0))))
     | Tpat_record (key_val_list, _) ->
       let list =
         List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
@@ -275,7 +287,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
     while !l != [] do
       (match !l with
       | hd :: tl ->
-        solve_eq hd (Fld (se, (constructor, se_of_int !i)));
+        solve_eq hd (Fld (se, (constructor, Some !i)));
         l := tl
       | _ -> assert false);
       i := !i + 1
@@ -286,91 +298,77 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
       match !l with
       | hd :: tl ->
         let i, p = hd in
-        solve_eq p (Fld (se, (None, se_of_int i)));
+        solve_eq p (Fld (se, (None, Some i)));
         l := tl
       | _ -> assert false
     done
   in
-  solve_eq vb.vb_pat (val_of_loc vb.vb_expr.exp_loc);
+  solve_eq vb.vb_pat (val_of_expr vb.vb_expr);
   let for_each_binding acc (name, list) =
-    List.rev_append
-      (List.map (fun l -> Ctor (Some (name, None), Some [|l|], None)) list)
-      acc
+    (let mem = new_memory () in
+     update_mem mem list;
+     Ctor (Some (name, None), Static [|mem|]))
+    :: acc
   in
   let seq_of_bindings = Hashtbl.to_seq local_binding in
   let ctor_list = Seq.fold_left for_each_binding [] seq_of_bindings in
-  (Union ctor_list, packet_of_loc vb.vb_expr.exp_loc)
+  (ctor_list, [packet_of_expr vb.vb_expr])
 
 let se_of_struct_item (item : CL.Typedtree.structure_item) =
-  let for_each_vb (vb : CL.Typedtree.value_binding) =
-    (val_of_loc vb.vb_loc, packet_of_loc vb.vb_loc)
-  in
-  let for_each_mb (mb : CL.Typedtree.module_binding) =
-    (val_of_loc mb.mb_loc, packet_of_loc mb.mb_loc)
-  in
   match item.str_desc with
-  | Tstr_eval (e, _) -> (Union [], packet_of_loc e.exp_loc)
+  | Tstr_eval (e, _) -> ([], [packet_of_expr e])
   | Tstr_value (_, vbs) ->
-    let v, p = List.split (List.map for_each_vb vbs) in
-    (Union v, Union p)
+    let v, p = List.split (List.map se_of_vb vbs) in
+    (List.flatten v, List.flatten p)
   | Tstr_module mb ->
-    let v, p = for_each_mb mb in
+    let v, p = se_of_mb mb in
     (v, p)
   | Tstr_recmodule mbs ->
-    let v, p = List.split (List.map for_each_mb mbs) in
-    (Union v, Union p)
-  | Tstr_include {incl_mod = {mod_loc}; incl_type} ->
-    let value = val_of_loc mod_loc in
-    let exn = packet_of_loc mod_loc in
+    let v, p = List.split (List.map se_of_mb mbs) in
+    (List.flatten v, List.flatten p)
+  | Tstr_include {incl_mod; incl_type} ->
+    let value = val_of_mod incl_mod in
     (* rebind included values & modules *)
     let for_each_sig_item : CL.Types.signature_item -> unit = function
       | (Sig_value (x, _) | Sig_module (x, _, _))
       [@if ocaml_version < (4, 08, 0) || defined npm] ->
-        update_var x (Fld (value, (Some (CL.Ident.name x, None), se_of_int 0)))
+        update_var x [Fld (value, (Some (CL.Ident.name x, None), Some 0))]
       | (Sig_value (x, _, _) | Sig_module (x, _, _, _, _))
       [@if ocaml_version >= (4, 08, 0) && not_defined npm] ->
-        update_var x (Fld (value, (Some (CL.Ident.name x, None), se_of_int 0)))
+        update_var x [Fld (value, (Some (CL.Ident.name x, None), Some 0))]
       | _ -> ()
     in
     List.iter for_each_sig_item incl_type;
-    (value, exn)
-  | _ -> (Union [], Union [])
+    ([value], [])
+  | _ -> ([], [])
 
 (* a struct is a union of constructs *)
 let se_of_struct (str : CL.Typedtree.structure) =
-  let for_each_item (item : CL.Typedtree.structure_item) =
-    (val_of_loc item.str_loc, packet_of_loc item.str_loc)
-  in
-  let v, p = List.split (List.map for_each_item str.str_items) in
-  (Union v, Union p)
+  let v, p = List.split (List.map se_of_struct_item str.str_items) in
+  (List.flatten v, List.flatten p)
 
 let se_of_module_expr (m : CL.Typedtree.module_expr) =
   match m.mod_desc with
-  | ((Tmod_functor (Named (Some x, {loc}, _), me))
+  | ((Tmod_functor (Named (Some x, _, _), me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    update_var x (Var (Val (Expr_var [loc])));
-    (Fn ([loc], [Expr me.mod_loc]), Union [])
+    update_var x [Var (Val (Expr_var x))];
+    ([Fn (Some x, [expr_of_mod me])], [])
   | (Tmod_functor (Named (None, _, _), me) | Tmod_functor (Unit, me))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm] ->
-    (Fn ([CL.Location.none], [Expr me.mod_loc]), Union [])
-  | ((Tmod_functor (x, {loc}, _, me))
+    ([Fn (None, [expr_of_mod me])], [])
+  | ((Tmod_functor (x, _, _, me))
   [@if ocaml_version < (4, 10, 0) || defined npm]) ->
-    update_var x (Var (Val (Expr_var [loc])));
-    (Fn ([loc], [Expr me.mod_loc]), Union [])
-  | Tmod_ident (x, {loc}) ->
-    update_to_be loc x;
-    (val_of_loc loc, packet_of_loc loc)
+    update_var x [Var (Val (Expr_var x))];
+    ([Fn (Some x, [expr_of_mod me])], [])
+  | Tmod_ident (x, _) ->
+    update_to_be (loc_of_mod m) x;
+    ([], [])
   | Tmod_structure structure -> se_of_struct structure
   | Tmod_apply (func, arg, _) ->
-    ( App_V (val_of_loc func.mod_loc, [Some (val_of_loc arg.mod_loc)]),
-      Union
-        [
-          App_P (val_of_loc func.mod_loc, [Some (val_of_loc arg.mod_loc)]);
-          packet_of_loc arg.mod_loc;
-        ] )
-  | Tmod_constraint (m, _, _, _) ->
-    (val_of_loc m.mod_loc, packet_of_loc m.mod_loc)
-  | Tmod_unpack (e, _) -> (val_of_loc e.exp_loc, packet_of_loc e.exp_loc)
+    ( [App_V (val_of_mod func, [Some (val_of_mod arg)])],
+      [packet_of_mod func; packet_of_mod arg] )
+  | Tmod_constraint (m, _, _, _) -> ([val_of_mod m], [packet_of_mod m])
+  | Tmod_unpack (e, _) -> ([val_of_expr e], [packet_of_expr e])
 
 (** determine whether or not to shadow the following cases by checking the existence of a guard *)
 let extract c =
@@ -380,23 +378,23 @@ let extract c =
   match guard with None -> ((lhs, false), rhs) | _ -> ((lhs, true), rhs)
 
 let se_of_expr (expr : CL.Typedtree.expression) =
-  (* solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
-  let rec solve_param (acc : unit se) (pattern, guarded) =
-    if guarded then (
-      solve_eq pattern acc |> ignore;
-      acc)
-    else Diff (acc, solve_eq pattern acc)
+  let fail s =
+    CL.Location.print_loc Format.str_formatter expr.exp_loc;
+    prerr_string (Format.flush_str_formatter () ^ "\n");
+    failwith s
+  in
   (* solves p = se and returns the set expression for p *)
-  and solve_eq (p : CL.Typedtree.pattern) (se : unit se) : unit se =
+  let rec solve_eq (p : CL.Typedtree.pattern) (se : value se) : pattern se list
+      =
     match p.pat_desc with
-    | Tpat_any -> Top
+    | Tpat_any -> [Top]
     | Tpat_var (x, _) ->
-      update_var x se;
-      Top
+      update_var x [se];
+      [Top]
     | Tpat_alias (p, a, _) ->
-      update_var a se;
+      update_var a [se];
       solve_eq p se
-    | Tpat_constant c -> Const c
+    | Tpat_constant c -> [Const c]
     | Tpat_tuple list -> solve_ctor None se list
     | ((Tpat_construct (_, {cstr_name; cstr_loc}, list, _))
     [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
@@ -408,11 +406,11 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       let constructor = Some (lbl, None) in
       match p_o with
       | None ->
-        Ctor (constructor, None, None)
+        [Ctor_pat (constructor, [||])]
         (* give up on being consistent with the actual mem repr *)
       | Some p ->
-        let sub = solve_eq p (Fld (se, (constructor, se_of_int 0))) in
-        Ctor (constructor, Some [|sub|], None))
+        let sub = solve_eq p (Fld (se, (constructor, Some 0))) in
+        List.map (fun x -> Ctor_pat (constructor, [|x|])) sub)
     | Tpat_record (key_val_list, _) ->
       let list =
         List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
@@ -420,13 +418,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       let lbl_all =
         match key_val_list with
         | (_, {CL.Types.lbl_all = l}, _) :: _ -> l
-        | _ -> failwith "Tried to match a record type without any fields"
+        | _ -> fail "Tried to match a record type without any fields"
       in
       let len = Array.length lbl_all in
       solve_rec len se list
     | Tpat_array list -> solve_ctor None se list
     | Tpat_lazy p -> solve_eq p (App_V (se, []))
-    | Tpat_or (lhs, rhs, _) -> union_of_list [solve_eq lhs se; solve_eq rhs se]
+    | Tpat_or (lhs, rhs, _) -> solve_eq lhs se @ solve_eq rhs se
   and solve_ctor constructor se list =
     let l = ref list in
     let args = ref [] in
@@ -434,13 +432,21 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     while !l != [] do
       (match !l with
       | hd :: tl ->
-        let ith_se = solve_eq hd (Fld (se, (constructor, se_of_int !i))) in
+        let ith_se = solve_eq hd (Fld (se, (constructor, Some !i))) in
         args := ith_se :: !args;
         l := tl
       | _ -> assert false);
       i := !i + 1
     done;
-    Ctor (constructor, Some (list_rev_to_array !args Top), None)
+    let flattened =
+      List.fold_left
+        (fun acc x ->
+          List.fold_left
+            (fun acc l -> List.map (fun y -> y :: l) x @ acc)
+            [] acc)
+        [] !args
+    in
+    List.map (fun l -> Ctor_pat (constructor, list_to_array l)) flattened
   and solve_rec len se list =
     (* Solve `list = se` and return the set expression of the list
        For example, `list [x, y, z] = se` should return [T, T, T] and
@@ -452,9 +458,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       match !l with
       | hd :: tl ->
         let i, p = hd in
-        let ith_se = solve_eq p (Fld (se, (None, se_of_int i))) in
+        let ith_se = solve_eq p (Fld (se, (None, Some i))) in
         while !cursor < i do
-          args := Top :: !args;
+          args := [Top] :: !args;
           incr cursor
         done;
         args := ith_se :: !args;
@@ -463,36 +469,48 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       | _ -> assert false
     done;
     while !cursor < len do
-      args := Top :: !args;
+      args := [Top] :: !args;
       incr cursor
     done;
-    Ctor (None, Some (list_rev_to_array !args Top), None)
+    let flattened =
+      List.fold_left
+        (fun acc x ->
+          List.fold_left
+            (fun acc l -> List.map (fun y -> y :: l) x @ acc)
+            [] acc)
+        [] !args
+    in
+    List.map (fun l -> Ctor_pat (None, list_to_array l)) flattened
   in
-  let val_list list =
-    List.map (fun e -> val_of_loc e.CL.Typedtree.exp_loc) list
+  (* solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
+  let solve_param (acc : value se) (pattern, guarded) : value se =
+    let p = solve_eq pattern acc in
+    let for_each_pat acc p =
+      let temp_var = Var (Val (new_temp_var ())) in
+      update_sc temp_var [Diff (acc, p)];
+      temp_var
+    in
+    if guarded then acc else List.fold_left for_each_pat acc p
   in
-  let exn_list list =
-    List.map (fun e -> packet_of_loc e.CL.Typedtree.exp_loc) list
-  in
+  let val_list list = List.map val_of_expr list in
+  let exn_list list = List.map packet_of_expr list in
   match expr.exp_desc with
-  | Texp_function {cases} ->
+  | Texp_function {param; cases} ->
     let value_pg, body = List.split (List.map extract cases) in
-    let value_p, _ = List.split value_pg in
-    let param = List.map (fun p -> p.CL.Typedtree.pat_loc) value_p in
     let arg = Var (Val (Expr_var param)) in
     List.fold_left solve_param arg value_pg |> ignore;
-    (Fn (param, List.map (fun e -> Expr e.CL.Typedtree.exp_loc) body), Union [])
+    ([Fn (Some param, List.map (fun e -> expr_of_expr e) body)], [])
   | ((Texp_match (exp, cases, exn_cases, _))
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let value_pg, value_body = List.split (List.map extract cases) in
     let exn_pg, exn_body = List.split (List.map extract exn_cases) in
-    let val_exp = val_of_loc exp.exp_loc in
-    let exn_exp = packet_of_loc exp.exp_loc in
+    let val_exp = val_of_expr exp in
+    let exn_exp = packet_of_expr exp in
     let () = List.fold_left solve_param val_exp value_pg |> ignore in
     let uncaught_exn = List.fold_left solve_param exn_exp exn_pg in
     let values = val_list (value_body @ exn_body) in
     let exns = exn_list (value_body @ exn_body) in
-    (Union values, Union (uncaught_exn :: exns))
+    (values, uncaught_exn :: exns)
   | ((Texp_match (exp, cases, _))
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let pg, body = List.split (List.map extract cases) in
@@ -529,209 +547,186 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let value_p, value_g, exn_p, exn_g = filter o g in
     let value_pg = List.combine value_p value_g in
     let exn_pg = List.combine exn_p exn_g in
-    let () =
-      List.fold_left solve_param (val_of_loc exp.exp_loc) value_pg |> ignore
-    in
-    let uncaught_exn =
-      List.fold_left solve_param (packet_of_loc exp.exp_loc) exn_pg
-    in
+    let () = List.fold_left solve_param (val_of_expr exp) value_pg |> ignore in
+    let uncaught_exn = List.fold_left solve_param (val_of_expr exp) exn_pg in
     let values = val_list body in
     let exns = exn_list body in
-    (Union values, Union (uncaught_exn :: exns))
+    (values, uncaught_exn :: exns)
   | Texp_try (exp, cases) ->
     let exn_pg, body = List.split (List.map extract cases) in
-    let uncaught_exn =
-      List.fold_left solve_param (packet_of_loc exp.exp_loc) exn_pg
-    in
+    let uncaught_exn = List.fold_left solve_param (packet_of_expr exp) exn_pg in
     let values = val_list body in
     let exns = exn_list body in
-    (Union values, Union (uncaught_exn :: exns))
+    (values, uncaught_exn :: exns)
   | Texp_let (_, vbs, e) ->
-    let exns = List.map (fun vb -> packet_of_loc vb.CL.Typedtree.vb_loc) vbs in
-    (val_of_loc e.exp_loc, Union (packet_of_loc e.exp_loc :: exns))
-  | Texp_ident (_, _, {val_kind = Val_prim prim}) -> (Prim prim, Union [])
-  | Texp_ident (x, {loc}, _) ->
-    update_to_be loc x;
-    (val_of_loc loc, packet_of_loc loc)
-  | Texp_constant c -> (Const c, Union [])
+    let exns =
+      List.map (fun vb -> packet_of_expr vb.CL.Typedtree.vb_expr) vbs
+    in
+    ([val_of_expr e], packet_of_expr e :: exns)
+  | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
+  | Texp_ident (x, _, _) ->
+    update_to_be (loc_of_expr expr) x;
+    ([], [])
+  | Texp_constant c -> ([Const c], [])
   | Texp_apply (e, args) ->
     let for_each_arg (_, (o : CL.Typedtree.expression option)) =
-      match o with Some e -> Some (val_of_loc e.exp_loc) | None -> None
+      match o with Some e -> Some (val_of_expr e) | None -> None
     in
     let acc_packet acc (_, (o : CL.Typedtree.expression option)) =
-      match o with Some e -> packet_of_loc e.exp_loc :: acc | None -> acc
+      match o with Some e -> packet_of_expr e :: acc | None -> acc
     in
-    let fn = val_of_loc e.exp_loc in
-    let exn_fn = packet_of_loc e.exp_loc in
+    let fn = val_of_expr e in
+    let exn_fn = packet_of_expr e in
     let exn_args = List.fold_left acc_packet [] args in
     let args = List.map for_each_arg args in
-    (App_V (fn, args), Union (App_P (fn, args) :: exn_fn :: exn_args))
+    ([App_V (fn, args)], App_P (fn, args) :: exn_fn :: exn_args)
   | Texp_tuple list ->
-    let values = list_to_array (val_list list) Top in
+    let values = list_to_array (val_list list) in
+    let mem = new_array (Array.length values) in
+    let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
     let exns = exn_list list in
-    (Ctor (None, Some values, None), Union exns)
+    ([Ctor (None, Static mem)], exns)
   | Texp_construct (_, {cstr_name; cstr_loc}, list) ->
-    let values = list_to_array (val_list list) Top in
+    let values = list_to_array (val_list list) in
+    let mem = new_array (Array.length values) in
+    let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
     let exns = exn_list list in
-    (Ctor (Some (cstr_name, Some cstr_loc), Some values, None), Union exns)
+    ([Ctor (Some (cstr_name, Some cstr_loc), Static mem)], exns)
   | Texp_record {fields; extended_expression} ->
-    let plus_alpha = new_memory () in
     let for_each_field
         ( (l : CL.Types.label_description),
           (def : CL.Typedtree.record_label_definition) ) =
+      let mem = new_memory () in
       let i = l.lbl_pos in
       let kept =
         match extended_expression with
-        | Some e -> Fld (val_of_loc e.exp_loc, (None, se_of_int i))
+        | Some e -> Fld (val_of_expr e, (None, Some i))
         | _ -> Top
       in
-      match def with
-      | Kept _ -> kept
-      | Overridden (_, e) -> val_of_loc e.exp_loc
+      let () =
+        match def with
+        | Kept _ -> update_mem mem [kept]
+        | Overridden (_, e) -> update_mem mem [val_of_expr e]
+      in
+      mem
     in
     let acc_exns acc (_, (def : CL.Typedtree.record_label_definition)) =
-      match def with
-      | Overridden (_, e) -> packet_of_loc e.exp_loc :: acc
-      | _ -> acc
+      match def with Overridden (_, e) -> packet_of_expr e :: acc | _ -> acc
     in
     let exns = Array.fold_left acc_exns [] fields in
     let exns =
       match extended_expression with
-      | Some e -> packet_of_loc e.exp_loc :: exns
+      | Some e -> packet_of_expr e :: exns
       | _ -> exns
     in
-    ( Ctor (None, Some (Array.map for_each_field fields), Some plus_alpha),
-      Union exns )
+    ([Ctor (None, Static (Array.map for_each_field fields))], exns)
   | Texp_field (e, _, lbl) ->
     let i = lbl.lbl_pos in
-    (Fld (val_of_loc e.exp_loc, (None, se_of_int i)), packet_of_loc e.exp_loc)
+    ([Fld (val_of_expr e, (None, Some i))], [packet_of_expr e])
   | Texp_variant (lbl, o) -> (
     match o with
     | Some e ->
-      ( Ctor (Some (lbl, None), Some [|val_of_loc e.exp_loc|], None),
-        packet_of_loc e.exp_loc )
-    | None -> (Ctor (Some (lbl, None), None, None), Union []))
+      let mem = new_memory () in
+      update_mem mem [val_of_expr e];
+      ([Ctor (Some (lbl, None), Static [|mem|])], [packet_of_expr e])
+    | None -> ([Ctor (Some (lbl, None), Static [||])], []))
   | Texp_setfield (e1, _, lbl, e2) ->
-    let val1 = val_of_loc e1.exp_loc in
-    let val2 = val_of_loc e2.exp_loc in
-    let exn1 = packet_of_loc e1.exp_loc in
-    let exn2 = packet_of_loc e2.exp_loc in
-    update_sc (Fld (val1, (None, se_of_int lbl.lbl_pos))) val2;
-    (Union [], Union [exn1; exn2])
+    let val1 = val_of_expr e1 in
+    let val2 = val_of_expr e2 in
+    let exn1 = packet_of_expr e1 in
+    let exn2 = packet_of_expr e2 in
+    update_sc (Fld (val1, (None, Some lbl.lbl_pos))) [val2];
+    ([], [exn1; exn2])
   | Texp_array list ->
-    let plus_alpha = new_memory () in
-    let arr = list_to_array list expr in
     let for_each_expr_val (expr : CL.Typedtree.expression) =
-      val_of_loc expr.exp_loc
+      let mem = new_memory () in
+      update_mem mem [val_of_expr expr];
+      mem
     in
-    let for_each_expr_exn (expr : CL.Typedtree.expression) =
-      packet_of_loc expr.exp_loc
-    in
-    ( Ctor (None, Some (Array.map for_each_expr_val arr), Some plus_alpha),
-      Union (List.map for_each_expr_exn list) )
+    let arr = list_to_array (List.map for_each_expr_val list) in
+    ([Ctor (None, Static arr)], List.map packet_of_expr list)
   | Texp_ifthenelse (pred, if_true, Some if_false) ->
-    let val1 = val_of_loc if_true.exp_loc in
-    let val2 = val_of_loc if_false.exp_loc in
-    let exn1 = packet_of_loc pred.exp_loc in
-    let exn2 = packet_of_loc pred.exp_loc in
-    let exn3 = packet_of_loc if_false.exp_loc in
-    (Union [val1; val2], Union [exn1; exn2; exn3])
-  | Texp_ifthenelse ({exp_loc = pred_loc}, {exp_loc = true_loc}, None) ->
-    (val_of_loc true_loc, Union [packet_of_loc pred_loc; packet_of_loc true_loc])
-  | Texp_sequence ({exp_loc = l1}, {exp_loc = l2}) ->
-    (val_of_loc l2, Union [packet_of_loc l1; packet_of_loc l2])
-  | Texp_while ({exp_loc = pred_loc}, {exp_loc = body_loc}) ->
-    (Union [], Union [packet_of_loc pred_loc; packet_of_loc body_loc])
-  | Texp_for
-      ( i,
-        {ppat_loc},
-        {exp_loc = start_loc},
-        {exp_loc = finish_loc},
-        direction,
-        {exp_loc = body_loc} ) ->
-    let val_i = val_of_loc ppat_loc in
-    let val_start = val_of_loc start_loc in
-    let exn_start = packet_of_loc start_loc in
-    let exn_finish = packet_of_loc finish_loc in
-    let exn_body = packet_of_loc body_loc in
-    let update_op =
-      match direction with Upto -> INT ADD | Downto -> INT SUB
-    in
-    update_var i val_i;
-    update_sc val_i (Union [val_start; Arith (update_op, [val_i; se_of_int 1])]);
-    (Union [], Union [exn_start; exn_finish; exn_body])
-  | ((Texp_letmodule (x, {loc}, {mod_loc}, {exp_loc}))
+    let val1 = val_of_expr if_true in
+    let val2 = val_of_expr if_false in
+    let exn1 = packet_of_expr pred in
+    let exn2 = packet_of_expr if_true in
+    let exn3 = packet_of_expr if_false in
+    ([val1; val2], [exn1; exn2; exn3])
+  | Texp_ifthenelse (pred, if_true, None) ->
+    ([val_of_expr if_true], [packet_of_expr pred; packet_of_expr if_true])
+  | Texp_sequence (e1, e2) ->
+    ([val_of_expr e2], [packet_of_expr e1; packet_of_expr e2])
+  | Texp_while (pred, body) -> ([], [packet_of_expr pred; packet_of_expr body])
+  | Texp_for (i, _, start, finish, _, body) ->
+    let exn_start = packet_of_expr start in
+    let exn_finish = packet_of_expr finish in
+    let exn_body = packet_of_expr body in
+    update_var i [Top];
+    ([], [exn_start; exn_finish; exn_body])
+  | ((Texp_letmodule (x, _, mod_loc, exp_loc))
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
-    let val_x = val_of_loc loc in
-    let val_m = val_of_loc mod_loc in
-    let val_e = val_of_loc exp_loc in
-    let exn_m = packet_of_loc mod_loc in
-    let exn_e = packet_of_loc exp_loc in
-    update_var x val_x;
-    update_sc val_x val_m;
-    (val_e, Union [exn_m; exn_e])
-  | ((Texp_letmodule (x, {loc}, _, {mod_loc}, {exp_loc}))
+    let val_m = val_of_mod mod_loc in
+    let val_e = val_of_expr exp_loc in
+    let exn_m = packet_of_mod mod_loc in
+    let exn_e = packet_of_expr exp_loc in
+    update_var x [val_m];
+    ([val_e], [exn_m; exn_e])
+  | ((Texp_letmodule (x, _, _, mod_loc, exp_loc))
   [@if
     ocaml_version >= (4, 08, 0) && ocaml_version < (4, 10, 0) && not_defined npm])
     ->
-    let val_x = val_of_loc loc in
-    let val_m = val_of_loc mod_loc in
-    let val_e = val_of_loc exp_loc in
-    let exn_m = packet_of_loc mod_loc in
-    let exn_e = packet_of_loc exp_loc in
-    update_var x val_x;
-    update_sc val_x val_m;
-    (val_e, Union [exn_m; exn_e])
-  | ((Texp_letmodule (Some x, {loc}, _, {mod_loc}, {exp_loc}))
+    let val_m = val_of_mod mod_loc in
+    let val_e = val_of_expr exp_loc in
+    let exn_m = packet_of_mod mod_loc in
+    let exn_e = packet_of_expr exp_loc in
+    update_var x [val_m];
+    ([val_e], [exn_m; exn_e])
+  | ((Texp_letmodule (Some x, _, _, mod_loc, exp_loc))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    let val_x = val_of_loc loc in
-    let val_m = val_of_loc mod_loc in
-    let val_e = val_of_loc exp_loc in
-    let exn_m = packet_of_loc mod_loc in
-    let exn_e = packet_of_loc exp_loc in
-    update_var x val_x;
-    update_sc val_x val_m;
-    (val_e, Union [exn_m; exn_e])
-  | ((Texp_letmodule (None, _, _, {mod_loc}, {exp_loc}))
+    let val_m = val_of_mod mod_loc in
+    let val_e = val_of_expr exp_loc in
+    let exn_m = packet_of_mod mod_loc in
+    let exn_e = packet_of_expr exp_loc in
+    update_var x [val_m];
+    ([val_e], [exn_m; exn_e])
+  | ((Texp_letmodule (None, _, _, mod_loc, exp_loc))
   [@if ocaml_version >= (4, 10, 0) && not_defined npm]) ->
-    let val_e = val_of_loc exp_loc in
-    let exn_m = packet_of_loc mod_loc in
-    let exn_e = packet_of_loc exp_loc in
-    (val_e, Union [exn_m; exn_e])
-  | Texp_letexception (_, {exp_loc}) ->
-    (val_of_loc exp_loc, packet_of_loc exp_loc)
-  | Texp_assert {exp_loc} ->
+    let val_e = val_of_expr exp_loc in
+    let exn_m = packet_of_mod mod_loc in
+    let exn_e = packet_of_expr exp_loc in
+    ([val_e], [exn_m; exn_e])
+  | Texp_letexception (_, exp) -> ([val_of_expr exp], [packet_of_expr exp])
+  | Texp_assert exp ->
     (* How to express Assert_failure... *)
-    (Union [], packet_of_loc exp_loc)
-  | Texp_lazy {exp_loc} -> (Fn ([], [Expr exp_loc]), Union [])
-  | Texp_pack {mod_loc} -> (val_of_loc mod_loc, packet_of_loc mod_loc)
+    ([], [Ctor (Some ("Assert_failure", None), Static [||]); packet_of_expr exp])
+  | Texp_lazy exp -> ([Fn (None, [expr_of_expr exp])], [])
+  | Texp_pack m -> ([val_of_mod m], [packet_of_mod m])
   | ((Texp_letop {let_; ands; body})
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let let_path = let_.bop_op_path in
-    let letop = val_of_loc let_.bop_op_name.loc in
-    let bound =
-      (val_of_loc let_.bop_exp.exp_loc, [packet_of_loc let_.bop_exp.exp_loc])
-    in
+    let letop = Var (Val (Expr (Alive let_.bop_op_name.loc))) in
+    let bound = (val_of_expr let_.bop_exp, [packet_of_expr let_.bop_exp]) in
     let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
       let and_path = andop.bop_op_path in
-      let and_val = val_of_loc andop.bop_op_name.loc in
-      let bound_val = val_of_loc andop.bop_exp.exp_loc in
-      let exn = packet_of_loc andop.bop_exp.exp_loc in
+      let and_val = Var (Val (Expr (Alive andop.bop_op_name.loc))) in
+      let bound_val = val_of_expr andop.bop_exp in
+      let exn = packet_of_expr andop.bop_exp in
       let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
-      update_to_be andop.bop_op_name.loc and_path;
+      update_to_be (Alive andop.bop_op_name.loc) and_path;
       (updated_val, exn :: acc_exn_list)
     in
     let bound_expr, exns = List.fold_left for_each_and bound ands in
-    let body_fn = Fn ([body.c_lhs.pat_loc], [Expr body.c_rhs.exp_loc]) in
+    let (Expr_var temp) = new_temp_var () in
+    let body_fn = Fn (Some temp, [expr_of_expr body.c_rhs]) in
     let value = App_V (letop, [Some bound_expr; Some body_fn]) in
     let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
-    solve_eq body.c_lhs (Var (Val (Expr_var [body.c_lhs.pat_loc]))) |> ignore;
-    update_to_be let_.bop_op_name.loc let_path;
-    (value, Union (exn :: exns))
-  | ((Texp_open (_, {exp_loc}))
-  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
-    (val_of_loc exp_loc, packet_of_loc exp_loc)
-  | _ -> (Union [], Union [])
+    solve_eq body.c_lhs (Var (Val (Expr_var temp))) |> ignore;
+    update_to_be (Alive let_.bop_op_name.loc) let_path;
+    ([value], exn :: exns)
+  | ((Texp_open (_, exp)) [@if ocaml_version >= (4, 08, 0) && not_defined npm])
+    ->
+    ([val_of_expr exp], [packet_of_expr exp])
+  | _ -> ([], [])
 
 (* expr, module_binding, module_expr, structure, structure_item, value_binding, value_bindings *)
 (* se_of_something returns the set expressions corresponding to the location of "something" *)
