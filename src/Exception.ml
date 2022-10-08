@@ -34,11 +34,15 @@ let rec resolve_path (path : Path.t) =
   match path with
   | Pident x -> se_of_var x
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
+    let m_temp = Var (Val (new_temp_var ())) in
     let m = resolve_path m in
-    List.map (fun m -> Fld (m, (Some (x, None), Some 0))) m
+    update_sc m_temp m;
+    [Fld (m_temp, (Some (x, None), Some 0))]
   | ((Pdot (m, x)) [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
+    let m_temp = Var (Val (new_temp_var ())) in
     let m = resolve_path m in
-    List.map (fun m -> Fld (m, (Some (x, None), Some 0))) m
+    update_sc m_temp m;
+    [Fld (m_temp, (Some (x, None), Some 0))]
   | Papply (f, x) ->
     let f_temp = Var (Val (new_temp_var ())) in
     let x_temp = Var (Val (new_temp_var ())) in

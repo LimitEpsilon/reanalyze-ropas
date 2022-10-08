@@ -135,7 +135,11 @@ and print_pattern : pattern se -> unit = function
   | Ctor_pat (k, arr) ->
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
-    Array.iter (fun p -> print_pattern p; prerr_string "; ") arr;
+    Array.iter
+      (fun p ->
+        print_pattern p;
+        prerr_string "; ")
+      arr;
     prerr_string ")"
   | Loc i -> prerr_int i
 
@@ -222,8 +226,11 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string (CL.Ident.unique_name x);
       prerr_string "\n se = ";
       let se_list = SESet.elements se in
-      List.iter print_se se_list;
-      prerr_newline ())
+      List.iter
+        (fun x ->
+          print_se x;
+          prerr_newline ())
+        se_list)
     var_to_se
 
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
@@ -235,8 +242,11 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
       | Fld (_, _) -> prerr_string " <- "
       | _ -> prerr_string " = ");
       let se_list = SESet.elements data in
-      List.iter print_se se_list;
-      prerr_newline ())
+      List.iter
+        (fun x ->
+          print_se x;
+          prerr_newline ())
+        se_list)
     tbl
 
 let print_sc_info () =

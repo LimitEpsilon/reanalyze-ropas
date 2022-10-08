@@ -227,7 +227,7 @@ let se_of_mb (mb : CL.Typedtree.module_binding) =
     let mem = new_memory () in
     update_var id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ( [Ctor (Some (CL.Ident.name id, Some mb.mb_loc), Static [|mem|])],
+    ( [Ctor (Some (CL.Ident.name id, None), Static [|mem|])],
       [packet_of_mod mb_expr] )
   | ({mb_id; mb_expr} [@if ocaml_version < (4, 10, 0) || defined npm]) ->
     let mem = new_memory () in
@@ -270,14 +270,19 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
       let constructor = Some (lbl, None) in
       match p_o with
       | None -> ()
-      | Some p -> solve_eq p (Fld (se, (constructor, Some 0))))
+      | Some p -> let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (constructor, Some 0))];
+        solve_eq p temp)
     | Tpat_record (key_val_list, _) ->
       let list =
         List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
       in
       solve_rec se list
     | Tpat_array list -> solve_ctor None se list
-    | Tpat_lazy p -> solve_eq p (App_V (se, []))
+    | Tpat_lazy p ->
+      let temp = Var (Val (new_temp_var ())) in
+      update_sc temp [App_V (se, [])];
+      solve_eq p temp
     | Tpat_or (lhs, rhs, _) ->
       solve_eq lhs se;
       solve_eq rhs se
@@ -287,7 +292,9 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
     while !l != [] do
       (match !l with
       | hd :: tl ->
-        solve_eq hd (Fld (se, (constructor, Some !i)));
+        let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (constructor, Some !i))];
+        solve_eq hd temp;
         l := tl
       | _ -> assert false);
       i := !i + 1
@@ -298,7 +305,9 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
       match !l with
       | hd :: tl ->
         let i, p = hd in
-        solve_eq p (Fld (se, (None, Some i)));
+        let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (None, Some i))];
+        solve_eq p temp;
         l := tl
       | _ -> assert false
     done
@@ -409,7 +418,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
         [Ctor_pat (constructor, [||])]
         (* give up on being consistent with the actual mem repr *)
       | Some p ->
-        let sub = solve_eq p (Fld (se, (constructor, Some 0))) in
+        let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (constructor, Some 0))];
+        let sub = solve_eq p temp in
         List.map (fun x -> Ctor_pat (constructor, [|x|])) sub)
     | Tpat_record (key_val_list, _) ->
       let list =
@@ -423,7 +434,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       let len = Array.length lbl_all in
       solve_rec len se list
     | Tpat_array list -> solve_ctor None se list
-    | Tpat_lazy p -> solve_eq p (App_V (se, []))
+    | Tpat_lazy p ->
+      let temp = Var (Val (new_temp_var ())) in
+      update_sc temp [App_V (se, [])];
+      solve_eq p temp
     | Tpat_or (lhs, rhs, _) -> solve_eq lhs se @ solve_eq rhs se
   and solve_ctor constructor se list =
     let l = ref list in
@@ -432,7 +446,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     while !l != [] do
       (match !l with
       | hd :: tl ->
-        let ith_se = solve_eq hd (Fld (se, (constructor, Some !i))) in
+        let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (constructor, Some !i))];
+        let ith_se = solve_eq hd temp in
         args := ith_se :: !args;
         l := tl
       | _ -> assert false);
@@ -458,7 +474,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       match !l with
       | hd :: tl ->
         let i, p = hd in
-        let ith_se = solve_eq p (Fld (se, (None, Some i))) in
+        let temp = Var (Val (new_temp_var ())) in
+        update_sc temp [Fld (se, (None, Some i))];
+        let ith_se = solve_eq p temp in
         while !cursor < i do
           args := [Top] :: !args;
           incr cursor
@@ -559,10 +577,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let exns = exn_list body in
     (values, uncaught_exn :: exns)
   | Texp_let (_, vbs, e) ->
-    let exns =
-      List.map (fun vb -> packet_of_expr vb.CL.Typedtree.vb_expr) vbs
-    in
-    ([val_of_expr e], packet_of_expr e :: exns)
+    let _, p = List.split (List.map se_of_vb vbs) in
+    let p = List.flatten p in
+    ([val_of_expr e], packet_of_expr e :: p)
   | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
   | Texp_ident (x, _, _) ->
     update_to_be (loc_of_expr expr) x;
