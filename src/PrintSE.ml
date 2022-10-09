@@ -65,10 +65,10 @@ let rec print_se : value se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
   | Fn (p, list) ->
-    prerr_string "<";
+    prerr_string "λ";
     print_param p;
-    print_expr_list_with_separator list ";";
-    prerr_string ">"
+    prerr_string ".";
+    print_expr_list_with_separator list ";"
   | Prim {prim_name} -> prerr_string ("Prim (" ^ prim_name ^ ")")
   | Var e ->
     prerr_string "X (";
@@ -88,12 +88,12 @@ let rec print_se : value se -> unit = function
     prerr_string ")"
   | Ctor (k, Static arr) ->
     prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
+    (match k with None -> prerr_string " " | Some s -> prerr_string s);
     print_arr_with_separator arr ";";
     prerr_string ")"
   | Ctor (k, Dynamic i) ->
     prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
+    (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string "malloc ";
     prerr_string (string_of_int i);
     prerr_string ")"
@@ -105,7 +105,7 @@ let rec print_se : value se -> unit = function
     | None, Some i ->
       prerr_string " , ";
       prerr_int i
-    | Some (s, _), Some i ->
+    | Some s, Some i ->
       prerr_string s;
       prerr_string ", ";
       prerr_int i
@@ -123,25 +123,26 @@ let rec print_se : value se -> unit = function
     prerr_string ")-(";
     print_pattern y;
     prerr_string ")"
+  | _ -> ()
 
 and print_pattern : pattern se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Fn (p, list) ->
-    prerr_string "<";
-    print_param p;
-    print_expr_list_with_separator list ";";
-    prerr_string ">"
+  | Var e ->
+    prerr_string "X (";
+    print_tagged_expr e;
+    prerr_string ")"
   | Ctor_pat (k, arr) ->
     prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some (s, _) -> prerr_string s);
+    (match k with None -> prerr_string " " | Some s -> prerr_string s);
     Array.iter
       (fun p ->
         print_pattern p;
         prerr_string "; ")
       arr;
     prerr_string ")"
-  | Loc i -> prerr_int i
+  | Loc (i, _) -> prerr_int i
+  | _ -> ()
 
 and print_ses (xs : value se list) =
   prerr_string "[";
@@ -201,9 +202,7 @@ and print_arr_with_separator arr sep =
   let i = ref 0 in
   prerr_string "[";
   while !i < len do
-    prerr_string "(";
-    print_int arr.(!i);
-    prerr_string ")";
+    prerr_int arr.(!i);
     if !i < len - 1 then prerr_string sep;
     incr i
   done;
@@ -226,12 +225,27 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string (CL.Ident.unique_name x);
       prerr_string "\n se = ";
       let se_list = SESet.elements se in
+      prerr_newline ();
       List.iter
         (fun x ->
           print_se x;
           prerr_newline ())
         se_list)
     var_to_se
+
+let show_mem (mem : (int, SESet.t) Hashtbl.t) =
+  Hashtbl.iter
+    (fun key data ->
+      prerr_string "mem :\n";
+      prerr_int key;
+      let se_list = SESet.elements data in
+      prerr_newline ();
+      List.iter
+        (fun x ->
+          print_se x;
+          prerr_newline ())
+        se_list)
+    mem
 
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
@@ -242,6 +256,7 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
       | Fld (_, _) -> prerr_string " <- "
       | _ -> prerr_string " = ");
       let se_list = SESet.elements data in
+      prerr_newline ();
       List.iter
         (fun x ->
           print_se x;
@@ -250,5 +265,6 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
     tbl
 
 let print_sc_info () =
+  show_mem mem;
   show_var_se_tbl var_to_se;
   show_sc_tbl sc

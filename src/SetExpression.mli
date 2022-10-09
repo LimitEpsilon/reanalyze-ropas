@@ -18,7 +18,7 @@ and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
   | Packet : 'a expr -> 'a tagged_expr
 
-and ctor = (string * CL.Location.t option) option
+and ctor = string option
 
 and fld = ctor * int option
 
@@ -63,8 +63,8 @@ and _ se =
   | Top : _ se
   | Const : CL.Asttypes.constant -> _ se
   | Prim : CL.Primitive.description -> value se
-  | Fn : param * code_loc expr list -> _ se
-  | Var : _ tagged_expr -> value se
+  | Fn : param * code_loc expr list -> value se
+  | Var : _ tagged_expr -> _ se
   | App_V : value se * arg -> value se
   | App_P : value se * arg -> value se
   | Ctor : ctor * arr -> value se
@@ -73,16 +73,17 @@ and _ se =
   | Arith : arithop * value se list -> value se
   | Rel : relop * value se list -> value se
   | Diff : value se * pattern se -> value se
-  | Loc : int -> pattern se
+  | Loc : int * pattern se option -> pattern se
 
 (* val address : int ref *)
-(* val new_memory : unit -> int *)
+val new_memory : unit -> int
 val new_temp_var : unit -> param expr
 
 module SESet : Set.S with type elt = value se
 
 val sc : (value se, SESet.t) Hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
+val mem : (int, SESet.t) Hashtbl.t
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 

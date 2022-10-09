@@ -37,12 +37,12 @@ let rec resolve_path (path : Path.t) =
     let m_temp = Var (Val (new_temp_var ())) in
     let m = resolve_path m in
     update_sc m_temp m;
-    [Fld (m_temp, (Some (x, None), Some 0))]
+    [Fld (m_temp, (Some x, Some 0))]
   | ((Pdot (m, x)) [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let m_temp = Var (Val (new_temp_var ())) in
     let m = resolve_path m in
     update_sc m_temp m;
-    [Fld (m_temp, (Some (x, None), Some 0))]
+    [Fld (m_temp, (Some x, Some 0))]
   | Papply (f, x) ->
     let f_temp = Var (Val (new_temp_var ())) in
     let x_temp = Var (Val (new_temp_var ())) in
