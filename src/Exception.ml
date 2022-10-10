@@ -62,6 +62,7 @@ let resolve_to_be_resolved () =
           match loc with
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
+          | Bop_loc t -> t.val_loc
         in
         prerr_string "Look at : ";
         Location.print_loc Format.str_formatter loc;

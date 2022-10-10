@@ -38,6 +38,7 @@ let print_code_loc loc =
 let print_loc = function
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
+  | Bop_loc t -> print_code_loc t.val_loc
 
 let print_param = function
   | None -> ()

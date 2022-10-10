@@ -1,6 +1,7 @@
 type code_loc =
   | Expr_loc of CL.Typedtree.expression
   | Mod_loc of CL.Typedtree.module_expr
+  | Bop_loc of CL.Types.value_description
 
 and param = CL.Ident.t option
 and arg = value se option list

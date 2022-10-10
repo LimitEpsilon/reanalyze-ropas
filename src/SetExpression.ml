@@ -3,6 +3,7 @@
 type code_loc =
   | Expr_loc of CL.Typedtree.expression
   | Mod_loc of CL.Typedtree.module_expr
+  | Bop_loc of CL.Types.value_description
 
 and param = CL.Ident.t option (* use Texp_function's param *)
 and arg = value se option list
@@ -700,15 +701,15 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | ((Texp_letop {let_; ands; body})
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let let_path = let_.bop_op_path in
-    let letop = Var (Val (Expr (Alive let_.bop_op_name.loc))) in
+    let letop = Var (Val (Expr (Bop_loc let_.bop_op_val))) in
     let bound = (val_of_expr let_.bop_exp, [packet_of_expr let_.bop_exp]) in
     let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
       let and_path = andop.bop_op_path in
-      let and_val = Var (Val (Expr (Alive andop.bop_op_name.loc))) in
+      let and_val = Var (Val (Expr (Bop_loc andop.bop_op_val))) in
       let bound_val = val_of_expr andop.bop_exp in
       let exn = packet_of_expr andop.bop_exp in
       let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
-      update_to_be (Alive andop.bop_op_name.loc) and_path;
+      update_to_be (Bop_loc andop.bop_op_val) and_path;
       (updated_val, exn :: acc_exn_list)
     in
     let bound_expr, exns = List.fold_left for_each_and bound ands in
@@ -717,7 +718,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let value = App_V (letop, [Some bound_expr; Some body_fn]) in
     let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
     solve_eq body.c_lhs (Var (Val (Expr_var temp))) |> ignore;
-    update_to_be (Alive let_.bop_op_name.loc) let_path;
+    update_to_be (Bop_loc let_.bop_op_val) let_path;
     ([value], exn :: exns)
   | ((Texp_open (_, exp)) [@if ocaml_version >= (4, 08, 0) && not_defined npm])
     ->
