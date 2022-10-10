@@ -25,7 +25,7 @@ let string_of_relop : relop -> string = function
   | GEN x -> (
     match x with
     | EQ -> "=="
-    | NE -> "!="
+    | NE -> "<>"
     | LT -> "<"
     | LE -> "<="
     | GT -> ">"
@@ -158,13 +158,13 @@ and print_ses (xs : value se list) =
 and print_se_list_with_separator l sep =
   let l' = ref l in
   prerr_string "[";
-  while !l' != [] do
+  while !l' <> [] do
     match !l' with
     | hd :: tl ->
       prerr_string "(";
       print_se hd;
       prerr_string ")";
-      if tl != [] then prerr_string sep;
+      if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
   done;
@@ -184,13 +184,13 @@ and print_pattern_arr_with_separator arr sep =
 and print_expr_list_with_separator l sep =
   let l' = ref l in
   prerr_string "[";
-  while !l' != [] do
+  while !l' <> [] do
     match !l' with
     | hd :: tl ->
       prerr_string "(";
       print_expr hd;
       prerr_string ")";
-      if tl != [] then prerr_string sep;
+      if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
   done;
@@ -199,16 +199,16 @@ and print_expr_list_with_separator l sep =
 and print_option_list_with_separator l sep =
   let l' = ref l in
   prerr_string "[";
-  while !l' != [] do
+  while !l' <> [] do
     match !l' with
     | Some hd :: tl ->
       prerr_string "(";
       print_se hd;
       prerr_string ")";
-      if tl != [] then prerr_string sep;
+      if tl <> [] then prerr_string sep;
       l' := tl
     | None :: tl ->
-      if tl != [] then prerr_string sep;
+      if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
   done;

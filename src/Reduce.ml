@@ -234,7 +234,7 @@ let resolve_var var set =
               (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
           | Fn (Some x, l) ->
             let values =
-              if tl != [] then
+              if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
               else SESet.of_list (List.map (fun e -> Var (Val e)) l)
             in
@@ -261,7 +261,7 @@ let resolve_var var set =
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
           | Fn (Some x, l) ->
             let app_p =
-              if tl != [] then
+              if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_P (Var (Val e), tl)) l)
               else SESet.empty
             in
@@ -294,7 +294,7 @@ let resolve_var var set =
                     (function
                       | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
                       | App_V (Prim p, l) ->
-                        if p.prim_arity != arg_len l then true else false
+                        if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
                     (try Hashtbl.find mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
@@ -327,7 +327,7 @@ let resolve_var var set =
                     (function
                       | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
                       | App_V (Prim p, l) ->
-                        if p.prim_arity != arg_len l then true else false
+                        if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
                     (try Hashtbl.find mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
@@ -431,7 +431,7 @@ let resolve_mem loc set =
               (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
           | Fn (Some x, l) ->
             let values =
-              if tl != [] then
+              if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
               else SESet.of_list (List.map (fun e -> Var (Val e)) l)
             in
@@ -458,7 +458,7 @@ let resolve_mem loc set =
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
           | Fn (Some x, l) ->
             let app_p =
-              if tl != [] then
+              if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_P (Var (Val e), tl)) l)
               else SESet.empty
             in
@@ -491,7 +491,7 @@ let resolve_mem loc set =
                     (function
                       | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
                       | App_V (Prim p, l) ->
-                        if p.prim_arity != arg_len l then true else false
+                        if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
                     (try Hashtbl.find mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
@@ -524,7 +524,7 @@ let resolve_mem loc set =
                     (function
                       | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
                       | App_V (Prim p, l) ->
-                        if p.prim_arity != arg_len l then true else false
+                        if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
                     (try Hashtbl.find mem l with _ -> SESet.empty)
                 | _ -> SESet.empty

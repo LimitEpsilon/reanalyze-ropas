@@ -52,7 +52,7 @@ and arith =
 
 and rel =
   | EQ  (** == *)
-  | NE  (** != *)
+  | NE  (** <> *)
   | LT  (** < *)
   | LE  (** <= *)
   | GT  (** > *)
@@ -166,7 +166,7 @@ let list_to_array l =
     let arr = Array.make len (List.hd l) in
     let i = ref 0 in
     let l = ref l in
-    while !l != [] do
+    while !l <> [] do
       match !l with
       | hd :: tl ->
         arr.(!i) <- hd;
@@ -268,7 +268,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
   and solve_ctor constructor se list =
     let l = ref list in
     let i = ref 0 in
-    while !l != [] do
+    while !l <> [] do
       (match !l with
       | hd :: tl ->
         let temp = Var (Val (new_temp_var ())) in
@@ -280,7 +280,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
     done
   and solve_rec se list =
     let l = ref list in
-    while !l != [] do
+    while !l <> [] do
       match !l with
       | hd :: tl ->
         let i, p = hd in
@@ -422,7 +422,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let l = ref list in
     let args = ref [] in
     let i = ref 0 in
-    while !l != [] do
+    while !l <> [] do
       (match !l with
       | hd :: tl ->
         let temp = Var (Val (new_temp_var ())) in
@@ -449,7 +449,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let l = ref list in
     let args = ref [] in
     let cursor = ref 0 in
-    while !l != [] do
+    while !l <> [] do
       match !l with
       | hd :: tl ->
         let i, p = hd in
