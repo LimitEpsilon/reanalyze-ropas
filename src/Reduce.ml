@@ -328,35 +328,6 @@ let resolve_var var set =
   SESet.iter resolve set
 
 let resolve_update (var, i) set =
-  let c_rvalue =
-    SESet.fold
-      (fun y acc ->
-        SESet.union
-          (match y with
-          | Var x ->
-            SESet.filter
-              (function
-                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                | App_V (Prim p, l) ->
-                  if p.prim_arity != arg_len l then true else false
-                | _ -> false)
-              (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
-          | _ -> SESet.empty)
-          acc)
-      set SESet.empty
-  in
-  let g_rvalue =
-    SESet.fold
-      (fun y acc ->
-        GESet.union
-          (match y with
-          | Var x ->
-            if Hashtbl.mem grammar (Var x) then Hashtbl.find grammar (Var x)
-            else GESet.empty
-          | _ -> GESet.empty)
-          acc)
-      set GESet.empty
-  in
   match Hashtbl.find grammar (Var var) with
   | p_set ->
     GESet.iter
@@ -366,11 +337,9 @@ let resolve_update (var, i) set =
             match arr.(i) with
             | Loc (l, Some _) ->
               arr.(i) <- Loc (l, None);
-              update_loc l c_rvalue;
-              update_abs_loc l g_rvalue
+              update_loc l set
             | Loc (l, None) ->
-              update_loc l c_rvalue;
-              update_abs_loc l g_rvalue
+              update_loc l set
             | _ -> ())
         | _ -> ())
       p_set
