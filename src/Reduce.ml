@@ -85,17 +85,16 @@ let rec filter_pat = function
   | x, p when x = p ->
     if !Common.Cli.debug then prerr_endline "lhs = rhs";
     GESet.empty
-  | x, Const c when x != Const c ->
+  | x, Const c when x <> Const c ->
     if !Common.Cli.debug then prerr_endline "rhs = const";
     GESet.singleton x
-  | (Ctor_pat (Some kappa, _) as x), Ctor_pat (Some kappa', _)
-    when kappa != kappa' ->
+  | (Ctor_pat (kappa, _) as x), Ctor_pat (kappa', _) when kappa <> kappa' ->
     if !Common.Cli.debug then (
       prerr_endline "lhs, rhs = ctor, no filter";
       prerr_string "lhs: ";
-      prerr_endline kappa;
+      (match kappa with Some s -> prerr_endline s | _ -> prerr_newline ());
       prerr_string "rhs: ";
-      prerr_endline kappa');
+      match kappa' with Some s -> prerr_endline s | _ -> prerr_newline ());
     GESet.singleton x
   | Top, Ctor_pat (kappa, arr) ->
     if !Common.Cli.debug then prerr_endline "lhs = Top, coerce into ctor";
@@ -118,8 +117,8 @@ let rec filter_pat = function
   | Loc (l, Some p), p' ->
     if !Common.Cli.debug then prerr_endline "lhs = loc with pat";
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
-  | Ctor_pat (kappa, arr), Ctor_pat (_, arr')
-    when Array.length arr = Array.length arr' ->
+  | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr')
+    when kappa = kappa' && Array.length arr = Array.length arr' ->
     if !Common.Cli.debug then prerr_endline "lhs, rhs = ctor, filter";
     let acc = ref GESet.empty in
     let i = ref 0 in
