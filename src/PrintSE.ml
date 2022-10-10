@@ -265,7 +265,7 @@ let show_mem (mem : (int, SESet.t) Hashtbl.t) =
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "insensitive_sc :\n";
+      prerr_string "sc :\n";
       print_se key;
       (match key with
       | Fld (_, _) -> prerr_string " <- "
@@ -316,3 +316,14 @@ let print_result () =
   show_grammar grammar
 
 let count = ref 0
+
+let solve () =
+  step_sc ();
+  step_mem ();
+  while !changed do
+    changed := false;
+    step_sc ();
+    step_mem ();
+    incr count;
+    if !count > 25 then print_result ()
+  done
