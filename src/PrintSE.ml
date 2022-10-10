@@ -92,6 +92,7 @@ let rec print_se : value se -> unit = function
   | Ctor (k, Static arr) ->
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
+    prerr_string ", ";
     print_arr_with_separator arr ";";
     prerr_string ")"
   | Ctor (k, Dynamic i) ->
@@ -138,13 +139,15 @@ and print_pattern : pattern se -> unit = function
   | Ctor_pat (k, arr) ->
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
-    Array.iter
-      (fun p ->
-        print_pattern p;
-        prerr_string "; ")
-      arr;
+    prerr_string ", ";
+    print_pattern_arr_with_separator arr ";";
     prerr_string ")"
-  | Loc (i, _) -> prerr_int i
+  | Loc (i, p) ->
+    prerr_string "(";
+    prerr_int i;
+    prerr_string ", ";
+    (match p with Some p -> print_pattern p | _ -> ());
+    prerr_string ")"
   | _ -> ()
 
 and print_ses (xs : value se list) =
@@ -164,6 +167,17 @@ and print_se_list_with_separator l sep =
       if tl != [] then prerr_string sep;
       l' := tl
     | _ -> assert false
+  done;
+  prerr_string "]"
+
+and print_pattern_arr_with_separator arr sep =
+  let len = Array.length arr in
+  let i = ref 0 in
+  prerr_string "[";
+  while !i < len do
+    print_pattern arr.(!i);
+    if !i < len - 1 then prerr_string sep;
+    incr i
   done;
   prerr_string "]"
 
@@ -227,13 +241,12 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string "var_to_se :\n ident = ";
       prerr_string (CL.Ident.unique_name x);
       prerr_string "\n se = ";
-      let se_list = SESet.elements se in
       prerr_newline ();
-      List.iter
+      SESet.iter
         (fun x ->
           print_se x;
           prerr_newline ())
-        se_list)
+        se)
     var_to_se
 
 let show_mem (mem : (int, SESet.t) Hashtbl.t) =
@@ -241,13 +254,12 @@ let show_mem (mem : (int, SESet.t) Hashtbl.t) =
     (fun key data ->
       prerr_string "mem :\n";
       prerr_int key;
-      let se_list = SESet.elements data in
       prerr_newline ();
-      List.iter
+      SESet.iter
         (fun x ->
           print_se x;
           prerr_newline ())
-        se_list)
+        data)
     mem
 
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
@@ -304,4 +316,3 @@ let print_result () =
   show_grammar grammar
 
 let count = ref 0
-

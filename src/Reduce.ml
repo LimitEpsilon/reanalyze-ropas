@@ -108,6 +108,7 @@ let rec filter_pat = function
     let len = Array.length arr in
     while !i < len do
       let ith = filter_pat (arr.(!i), arr'.(!i)) in
+      if GESet.is_empty ith then prerr_string "empty\n";
       let set =
         GESet.map
           (fun x ->
@@ -240,8 +241,13 @@ let resolve_var var set =
             update_c (Var var)
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
           | Fn (Some x, l) ->
-            let exns = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
-            update_c (Var var) exns;
+            let app_p =
+              if tl != [] then
+                SESet.of_list (List.map (fun e -> App_P (Var (Val e), tl)) l)
+              else SESet.empty
+            in
+            let body_p = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
+            update_c (Var var) (SESet.union app_p body_p);
             update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
           | App_V (Prim p, l) when arg_len l < p.prim_arity ->
             let app =
@@ -338,8 +344,7 @@ let resolve_update (var, i) set =
             | Loc (l, Some _) ->
               arr.(i) <- Loc (l, None);
               update_loc l set
-            | Loc (l, None) ->
-              update_loc l set
+            | Loc (l, None) -> update_loc l set
             | _ -> ())
         | _ -> ())
       p_set

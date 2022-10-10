@@ -114,6 +114,6 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
 
 let reportResults ~ppf:_ =
   resolve_to_be_resolved ();
-  if !Common.Cli.debug then PrintSE.print_sc_info ();
   solve ();
-  PrintSE.print_result ()
+  PrintSE.print_result ();
+  if !Common.Cli.debug then PrintSE.print_sc_info ()

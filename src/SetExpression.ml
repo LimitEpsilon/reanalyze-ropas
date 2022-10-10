@@ -554,7 +554,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let uncaught_exn = List.fold_left solve_param (packet_of_expr exp) exn_pg in
     let values = val_list body in
     let exns = exn_list body in
-    (values, uncaught_exn :: exns)
+    (val_of_expr exp :: values, uncaught_exn :: exns)
   | Texp_let (_, vbs, e) ->
     let _, p = List.split (List.map se_of_vb vbs) in
     let p = List.flatten p in
