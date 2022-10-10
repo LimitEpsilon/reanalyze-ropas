@@ -1,9 +1,8 @@
 [%%import "../config.h"]
 
 type code_loc =
-  | Alive of CL.Location.t
-  | Expr_ghost of CL.Typedtree.expression
-  | Mod_ghost of CL.Typedtree.module_expr
+  | Expr_loc of CL.Typedtree.expression
+  | Mod_loc of CL.Typedtree.module_expr
 
 and param = CL.Ident.t option (* use Texp_function's param *)
 and arg = value se option list
@@ -159,23 +158,6 @@ let update_mem key data =
     Hashtbl.add mem key (SESet.union original set))
   else Hashtbl.add mem key set
 
-let list_rev_to_array l =
-  let len = List.length l in
-  if len = 0 then [||]
-  else
-    let arr = Array.make len (List.hd l) in
-    let i = ref (len - 1) in
-    let l = ref l in
-    while !l != [] do
-      match !l with
-      | hd :: tl ->
-        arr.(!i) <- hd;
-        decr i;
-        l := tl
-      | _ -> assert false
-    done;
-    arr
-
 let list_to_array l =
   let len = List.length l in
   if len = 0 then [||]
@@ -204,16 +186,11 @@ let se_of_var x =
   in
   se_list
 
-let loc_of_mod ({CL.Typedtree.mod_loc} as mod_expr) =
-  if mod_loc.loc_ghost then Mod_ghost mod_expr else Alive mod_loc
-
+let loc_of_mod mod_expr = Mod_loc mod_expr
 let expr_of_mod me = Expr (loc_of_mod me)
 let val_of_mod me = Var (Val (expr_of_mod me))
 let packet_of_mod me = Var (Packet (expr_of_mod me))
-
-let loc_of_expr ({CL.Typedtree.exp_loc} as expr) =
-  if exp_loc.loc_ghost then Expr_ghost expr else Alive exp_loc
-
+let loc_of_expr expr = Expr_loc expr
 let expr_of_expr e = Expr (loc_of_expr e)
 let val_of_expr e = Var (Val (expr_of_expr e))
 let packet_of_expr e = Var (Packet (expr_of_expr e))

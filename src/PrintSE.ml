@@ -1,4 +1,5 @@
 open SetExpression
+open Reduce
 
 let string_of_arithop : arithop -> string = function
   | INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x -> (
@@ -30,12 +31,13 @@ let string_of_relop : relop -> string = function
     | GT -> ">"
     | GE -> ">=")
 
+let print_code_loc loc =
+  CL.Location.print_loc Format.str_formatter loc;
+  prerr_string (Format.flush_str_formatter ())
+
 let print_loc = function
-  | Alive loc ->
-    CL.Location.print_loc Format.str_formatter loc;
-    prerr_string (Format.flush_str_formatter ())
-  | Expr_ghost _ -> prerr_string "ghost_expr"
-  | Mod_ghost _ -> prerr_string "ghost_module"
+  | Expr_loc e -> print_code_loc e.exp_loc
+  | Mod_loc m -> print_code_loc m.mod_loc
 
 let print_param = function
   | None -> ()
@@ -255,16 +257,50 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
       (match key with
       | Fld (_, _) -> prerr_string " <- "
       | _ -> prerr_string " = ");
-      let se_list = SESet.elements data in
       prerr_newline ();
-      List.iter
+      SESet.iter
         (fun x ->
           print_se x;
           prerr_newline ())
-        se_list)
+        data)
     tbl
+
+let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
+  Hashtbl.iter
+    (fun key data ->
+      prerr_string "grammar :\n";
+      print_pattern key;
+      prerr_string " = ";
+      prerr_newline ();
+      GESet.iter
+        (fun x ->
+          print_pattern x;
+          prerr_newline ())
+        data)
+    g
+
+let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
+  Hashtbl.iter
+    (fun key data ->
+      prerr_string "abs_mem :\n";
+      prerr_int key;
+      prerr_string " = ";
+      prerr_newline ();
+      GESet.iter
+        (fun x ->
+          print_pattern x;
+          prerr_newline ())
+        data)
+    a
 
 let print_sc_info () =
   show_mem mem;
   show_var_se_tbl var_to_se;
   show_sc_tbl sc
+
+let print_result () =
+  show_abs_mem abs_mem;
+  show_grammar grammar
+
+let count = ref 0
+

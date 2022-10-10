@@ -1,7 +1,6 @@
 type code_loc =
-  | Alive of CL.Location.t
-  | Expr_ghost of CL.Typedtree.expression
-  | Mod_ghost of CL.Typedtree.module_expr
+  | Expr_loc of CL.Typedtree.expression
+  | Mod_loc of CL.Typedtree.module_expr
 
 and param = CL.Ident.t option
 and arg = value se option list
@@ -10,16 +9,13 @@ and _ expr =
   | Expr_var : CL.Ident.t -> param expr
   | Expr : code_loc -> code_loc expr
 
-and arr =
-  | Static of int array
-  | Dynamic of int
+and arr = Static of int array | Dynamic of int
 
 and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
   | Packet : 'a expr -> 'a tagged_expr
 
 and ctor = string option
-
 and fld = ctor * int option
 
 and arith =
@@ -40,13 +36,7 @@ and arith =
   | SUCC
   | PRED
 
-and rel =
-  | EQ
-  | NE
-  | LT
-  | LE
-  | GT
-  | GE
+and rel = EQ | NE | LT | LE | GT | GE
 
 and arithop =
   | INT of arith
@@ -104,9 +94,14 @@ val packet_of_mod : CL.Typedtree.module_expr -> value se
 val se_of_var : CL.Ident.t -> value se list
 val se_of_mb : CL.Typedtree.module_binding -> value se list * value se list
 val se_of_vb : CL.Typedtree.value_binding -> value se list * value se list
-val se_of_struct_item : CL.Typedtree.structure_item -> value se list * value se list
+
+val se_of_struct_item :
+  CL.Typedtree.structure_item -> value se list * value se list
+
 val se_of_struct : CL.Typedtree.structure -> value se list * value se list
-val se_of_module_expr : CL.Typedtree.module_expr -> value se list * value se list
+
+val se_of_module_expr :
+  CL.Typedtree.module_expr -> value se list * value se list
 
 (* val extract :
  *   'a CL.Typedtree.case ->

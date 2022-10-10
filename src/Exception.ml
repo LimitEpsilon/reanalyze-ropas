@@ -2,6 +2,7 @@
 
 open CL
 open SetExpression
+open Reduce
 
 let isApply : Types.value_description -> bool = function
   | {val_kind = Val_prim {prim_name = "%apply"}} -> true
@@ -59,9 +60,8 @@ let resolve_to_be_resolved () =
       if !Common.Cli.debug then (
         let loc =
           match loc with
-          | Alive l -> l
-          | Expr_ghost e -> e.exp_loc
-          | Mod_ghost m -> m.mod_loc
+          | Expr_loc e -> e.exp_loc
+          | Mod_loc m -> m.mod_loc
         in
         prerr_string "Look at : ";
         Location.print_loc Format.str_formatter loc;
@@ -113,4 +113,6 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
 
 let reportResults ~ppf:_ =
   resolve_to_be_resolved ();
-  if !Common.Cli.debug then PrintSE.print_sc_info ()
+  if !Common.Cli.debug then PrintSE.print_sc_info ();
+  solve ();
+  PrintSE.print_result ()

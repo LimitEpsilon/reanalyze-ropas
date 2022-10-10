@@ -1,6 +1,6 @@
 open SetExpression
 
-exception Not_resolvable
+exception Not_resolvable of value se
 
 let resolve_as_const : unit se -> CL.Asttypes.constant = function
   | Arith (INT ADD, [_; _]) -> Const_char 'c'
@@ -23,7 +23,7 @@ let resolve_as_const : unit se -> CL.Asttypes.constant = function
   | _ -> Const_int 1
 
 let resolve_arith : unit se -> unit se =
- fun e -> try Const (resolve_as_const e) with Not_resolvable -> Top
+ fun e -> try Const (resolve_as_const e) with _ -> Top
 
 let decode_prim = function
   | "%identity" | "%bytes_to_string" | "%bytes_of_string" -> `IDENTITY
@@ -120,8 +120,7 @@ let decode_prim = function
   | "%dls_get" (* domain-local-state *) | _ ->
     `EXTERN
 
-let c_changed = ref false
-let g_changed = ref false
+let changed = ref false
 
 module GE = struct
   type t = pattern se
@@ -132,48 +131,60 @@ end
 module GESet = Set.Make (GE)
 
 let update_c key set =
-  if Hashtbl.mem sc key then (
+  if Hashtbl.mem sc key then
     let original = Hashtbl.find sc key in
     let diff = SESet.diff set original in
-    if SESet.is_empty diff then () else Hashtbl.remove sc key;
-    Hashtbl.add sc key (SESet.union original set);
-    c_changed := true)
-  else Hashtbl.add sc key set;
-  c_changed := true
+    if SESet.is_empty diff then ()
+    else (
+      Hashtbl.remove sc key;
+      Hashtbl.add sc key (SESet.union original diff);
+      changed := true)
+  else (
+    Hashtbl.add sc key set;
+    changed := true)
 
 let update_loc key set =
-  if Hashtbl.mem mem key then (
+  if Hashtbl.mem mem key then
     let original = Hashtbl.find mem key in
     let diff = SESet.diff set original in
-    if SESet.is_empty diff then () else Hashtbl.remove mem key;
-    Hashtbl.add mem key (SESet.union original set);
-    c_changed := true)
-  else Hashtbl.add mem key set;
-  c_changed := true
+    if SESet.is_empty diff then ()
+    else (
+      Hashtbl.remove mem key;
+      Hashtbl.add mem key (SESet.union original diff);
+      changed := true)
+  else (
+    Hashtbl.add mem key set;
+    changed := true)
 
 let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_g key set =
-  if Hashtbl.mem grammar key then (
+  if Hashtbl.mem grammar key then
     let original = Hashtbl.find grammar key in
     let diff = GESet.diff set original in
-    if GESet.is_empty diff then () else Hashtbl.remove grammar key;
-    Hashtbl.add grammar key (GESet.union original diff);
-    g_changed := true)
-  else Hashtbl.add grammar key set;
-  g_changed := true
+    if GESet.is_empty diff then ()
+    else (
+      Hashtbl.remove grammar key;
+      Hashtbl.add grammar key (GESet.union original diff);
+      changed := true)
+  else (
+    Hashtbl.add grammar key set;
+    changed := true)
 
 let abs_mem : (int, GESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_abs_loc key set =
-  if Hashtbl.mem abs_mem key then (
+  if Hashtbl.mem abs_mem key then
     let original = Hashtbl.find abs_mem key in
     let diff = GESet.diff set original in
-    if GESet.is_empty diff then () else Hashtbl.remove abs_mem key;
-    Hashtbl.add abs_mem key (GESet.union original set);
-    g_changed := true)
-  else Hashtbl.add abs_mem key set;
-  g_changed := true
+    if GESet.is_empty diff then ()
+    else (
+      Hashtbl.remove abs_mem key;
+      Hashtbl.add abs_mem key (GESet.union original diff);
+      changed := true)
+  else (
+    Hashtbl.add abs_mem key set;
+    changed := true)
 
 let rec arg_len = function
   | [] -> 0
@@ -186,6 +197,7 @@ let rec merge_args = function
   | None :: tl, hd :: l -> hd :: merge_args (tl, l)
   | Some x :: tl, l -> Some x :: merge_args (tl, l)
 
+(* no support for arrays yet *)
 let rec filter_pat = function
   | _, Top -> GESet.empty
   | x, p when x = p -> GESet.empty
@@ -231,6 +243,8 @@ let rec filter_pat = function
     !acc
   | _ -> GESet.empty
 
+let allocated = ref SESet.empty
+
 let value_prim = function
   | {CL.Primitive.prim_name = "%revapply"}, [Some x; Some y] ->
     SESet.singleton (App_V (y, [Some x]))
@@ -247,9 +261,12 @@ let value_prim = function
     update_c (Fld (x, (None, Some 0))) (SESet.singleton y);
     SESet.singleton (Ctor (Some "()", Static [||]))
   | {CL.Primitive.prim_name = "%makemutable"}, [Some x] ->
-    let i = new_memory () in
-    update_loc i (SESet.singleton x);
-    SESet.singleton (Ctor (None, Static [|i|]))
+    if SESet.mem x !allocated then SESet.empty
+    else (
+      allocated := SESet.add x !allocated;
+      let i = new_memory () in
+      update_loc i (SESet.singleton x);
+      SESet.singleton (Ctor (None, Static [|i|])))
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
     SESet.singleton (App_V (x, []))
   | _ -> SESet.singleton Top
@@ -269,53 +286,393 @@ let packet_prim = function
     SESet.singleton x
   | _ -> SESet.empty
 
-let step_sc var =
-  let key = Var var in
-  let reduce = function
-    | (Top | Const _ | Fn _) as x -> update_g key (GESet.singleton x)
+let resolve_var var set =
+  let resolve = function
+    | Top -> update_g (Var var) (GESet.singleton Top)
+    | Const c -> update_g (Var var) (GESet.singleton (Const c))
     | Ctor (kappa, Static arr) ->
       let arr' = Array.map (fun i -> Loc (i, None)) arr in
-      update_g key (GESet.singleton (Ctor_pat (kappa, arr')))
+      update_g (Var var) (GESet.singleton (Ctor_pat (kappa, arr')))
     | Var x ->
       let set =
         SESet.filter
           (function
             | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
             | App_V (Prim p, l) ->
-              if p.prim_arity != arg_len l then true else false
+              if arg_len l < p.prim_arity then true else false
             | _ -> false)
-          (Hashtbl.find sc (Var x))
+          (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
       in
       update_c (Var var) set;
       if Hashtbl.mem grammar (Var x) then
-        update_g key (Hashtbl.find grammar (Var x))
+        update_g (Var var) (Hashtbl.find grammar (Var x))
     | App_V (Prim p, l) ->
-      if p.prim_arity = arg_len l then update_c key (value_prim (p, l))
+      if p.prim_arity = arg_len l then update_c (Var var) (value_prim (p, l))
     | App_P (Prim p, l) ->
-      if p.prim_arity = arg_len l then update_c key (packet_prim (p, l))
+      if p.prim_arity = arg_len l then update_c (Var var) (packet_prim (p, l))
     | App_V (Var x, []) ->
-      if Hashtbl.mem grammar (Var x) then
-        SESet.iter
-          (function
-            | Fn (None, l) ->
-              let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
-              update_c (Var var) set
-            | _ -> ())
-          (Hashtbl.find sc (Var x))
+      SESet.iter
+        (function
+          | Fn (None, l) ->
+            let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
+            update_c (Var var) set
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
     | App_P (Var x, []) ->
-      if Hashtbl.mem grammar (Var x) then
-        GESet.iter
-          (function
-            | Fn (None, l) ->
-              let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
-              update_c (Var var) set
-            | _ -> ())
-          (Hashtbl.find grammar (Var x))
-    | App_V (Var x, Some (Var y) :: tl) -> ()
-    | App_P (Var x, Some (Var y) :: tl) -> ()
-    | Fld (Var x, (None, Some i)) -> ()
-    | Fld (Var x, (Some k, Some i)) -> ()
-    | Diff (Var x, p) -> ()
+      SESet.iter
+        (function
+          | Fn (None, l) ->
+            let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
+            update_c (Var var) set
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | App_V (Var x, Some (Var y) :: tl) ->
+      SESet.iter
+        (function
+          | Prim p ->
+            update_c (Var var)
+              (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
+          | Fn (Some x, l) ->
+            let values =
+              if tl != [] then
+                SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
+              else SESet.of_list (List.map (fun e -> Var (Val e)) l)
+            in
+            update_c (Var var) values;
+            update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+          | App_V (Prim p, l) when arg_len l < p.prim_arity ->
+            let app =
+              SESet.singleton
+                (App_V (Prim p, merge_args (l, Some (Var y) :: tl)))
+            in
+            update_c (Var var) app
+          | App_V (f, None :: tl') ->
+            let app =
+              SESet.singleton (App_V (f, Some (Var y) :: merge_args (tl', tl)))
+            in
+            update_c (Var var) app
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | App_P (Var x, Some (Var y) :: tl) ->
+      SESet.iter
+        (function
+          | Prim p ->
+            update_c (Var var)
+              (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
+          | Fn (Some x, l) ->
+            let exns = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
+            update_c (Var var) exns;
+            update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+          | App_V (Prim p, l) when arg_len l < p.prim_arity ->
+            let app =
+              SESet.singleton
+                (App_P (Prim p, merge_args (l, Some (Var y) :: tl)))
+            in
+            update_c (Var var) app
+          | App_V (f, None :: tl') ->
+            let app =
+              SESet.singleton (App_P (f, Some (Var y) :: merge_args (tl', tl)))
+            in
+            update_c (Var var) app
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | Fld (Var x, (None, Some i)) ->
+      GESet.iter
+        (function
+          | Top -> update_g (Var var) (GESet.singleton Top)
+          | Ctor_pat (_, arr) ->
+            let c_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (l, _) ->
+                  SESet.filter
+                    (function
+                      | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                      | App_V (Prim p, l) ->
+                        if p.prim_arity != arg_len l then true else false
+                      | _ -> false)
+                    (try Hashtbl.find mem l with _ -> SESet.empty)
+                | _ -> SESet.empty
+              else SESet.empty
+            in
+            let g_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (_, Some p) -> GESet.singleton p
+                | Loc (l, None) ->
+                  if Hashtbl.mem abs_mem l then Hashtbl.find abs_mem l
+                  else GESet.empty
+                | p -> GESet.singleton p
+              else GESet.empty
+            in
+            update_c (Var var) c_set;
+            update_g (Var var) g_set
+          | _ -> ())
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
+    | Fld (Var x, (Some k, Some i)) ->
+      GESet.iter
+        (function
+          | Top -> update_g (Var var) (GESet.singleton Top)
+          | Ctor_pat (Some k', arr) when k = k' ->
+            let c_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (l, _) ->
+                  SESet.filter
+                    (function
+                      | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                      | App_V (Prim p, l) ->
+                        if p.prim_arity != arg_len l then true else false
+                      | _ -> false)
+                    (try Hashtbl.find mem l with _ -> SESet.empty)
+                | _ -> SESet.empty
+              else SESet.empty
+            in
+            let g_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (_, Some p) -> GESet.singleton p
+                | Loc (l, None) ->
+                  if Hashtbl.mem abs_mem l then Hashtbl.find abs_mem l
+                  else GESet.empty
+                | p -> GESet.singleton p
+              else GESet.empty
+            in
+            update_c (Var var) c_set;
+            update_g (Var var) g_set
+          | _ -> ())
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
+    | Diff (Var x, p) -> update_g (Var var) (filter_pat (Var x, p))
     | _ -> ()
   in
-  ()
+  SESet.iter resolve set
+
+let resolve_update (var, i) set =
+  let c_rvalue =
+    SESet.fold
+      (fun y acc ->
+        SESet.union
+          (match y with
+          | Var x ->
+            SESet.filter
+              (function
+                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                | App_V (Prim p, l) ->
+                  if p.prim_arity != arg_len l then true else false
+                | _ -> false)
+              (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+          | _ -> SESet.empty)
+          acc)
+      set SESet.empty
+  in
+  let g_rvalue =
+    SESet.fold
+      (fun y acc ->
+        GESet.union
+          (match y with
+          | Var x ->
+            if Hashtbl.mem grammar (Var x) then Hashtbl.find grammar (Var x)
+            else GESet.empty
+          | _ -> GESet.empty)
+          acc)
+      set GESet.empty
+  in
+  match Hashtbl.find grammar (Var var) with
+  | p_set ->
+    GESet.iter
+      (function
+        | Ctor_pat (_, arr) -> (
+          if i < Array.length arr then
+            match arr.(i) with
+            | Loc (l, Some _) ->
+              arr.(i) <- Loc (l, None);
+              update_loc l c_rvalue;
+              update_abs_loc l g_rvalue
+            | Loc (l, None) ->
+              update_loc l c_rvalue;
+              update_abs_loc l g_rvalue
+            | _ -> ())
+        | _ -> ())
+      p_set
+  | exception _ -> ()
+
+let step_sc () =
+  Hashtbl.iter
+    (fun x set ->
+      match x with
+      | Var var -> resolve_var var set
+      | Fld (Var var, (None, Some i)) -> resolve_update (var, i) set
+      | _ -> ())
+    sc
+
+let resolve_mem loc set =
+  let resolve = function
+    | Top -> update_abs_loc loc (GESet.singleton Top)
+    | Const c -> update_abs_loc loc (GESet.singleton (Const c))
+    | Ctor (kappa, Static arr) ->
+      let arr' = Array.map (fun i -> Loc (i, None)) arr in
+      update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, arr')))
+    | Var x ->
+      let set =
+        SESet.filter
+          (function
+            | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+            | App_V (Prim p, l) ->
+              if arg_len l < p.prim_arity then true else false
+            | _ -> false)
+          (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+      in
+      update_loc loc set;
+      if Hashtbl.mem grammar (Var x) then
+        update_abs_loc loc (Hashtbl.find grammar (Var x))
+    | App_V (Prim p, l) ->
+      if p.prim_arity = arg_len l then update_loc loc (value_prim (p, l))
+    | App_P (Prim p, l) ->
+      if p.prim_arity = arg_len l then update_loc loc (packet_prim (p, l))
+    | App_V (Var x, []) ->
+      SESet.iter
+        (function
+          | Fn (None, l) ->
+            let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
+            update_loc loc set
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | App_P (Var x, []) ->
+      SESet.iter
+        (function
+          | Fn (None, l) ->
+            let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
+            update_loc loc set
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | App_V (Var x, Some (Var y) :: tl) ->
+      SESet.iter
+        (function
+          | Prim p ->
+            update_loc loc
+              (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
+          | Fn (Some x, l) ->
+            let values =
+              if tl != [] then
+                SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
+              else SESet.of_list (List.map (fun e -> Var (Val e)) l)
+            in
+            update_loc loc values;
+            update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+          | App_V (Prim p, l) when arg_len l < p.prim_arity ->
+            let app =
+              SESet.singleton
+                (App_V (Prim p, merge_args (l, Some (Var y) :: tl)))
+            in
+            update_loc loc app
+          | App_V (f, None :: tl') ->
+            let app =
+              SESet.singleton (App_V (f, Some (Var y) :: merge_args (tl', tl)))
+            in
+            update_loc loc app
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | App_P (Var x, Some (Var y) :: tl) ->
+      SESet.iter
+        (function
+          | Prim p ->
+            update_loc loc
+              (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
+          | Fn (Some _, l) ->
+            let exns = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
+            update_loc loc exns;
+            update_loc loc (SESet.singleton (Var y))
+          | App_V (Prim p, l) ->
+            let app =
+              SESet.singleton
+                (App_P (Prim p, merge_args (l, Some (Var y) :: tl)))
+            in
+            update_loc loc app
+          | App_V (f, None :: tl') ->
+            let app =
+              SESet.singleton (App_P (f, Some (Var y) :: merge_args (tl', tl)))
+            in
+            update_loc loc app
+          | _ -> ())
+        (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
+    | Fld (Var x, (None, Some i)) ->
+      GESet.iter
+        (function
+          | Top -> update_abs_loc loc (GESet.singleton Top)
+          | Ctor_pat (_, arr) ->
+            let c_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (l, _) ->
+                  SESet.filter
+                    (function
+                      | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                      | App_V (Prim p, l) ->
+                        if p.prim_arity != arg_len l then true else false
+                      | _ -> false)
+                    (try Hashtbl.find mem l with _ -> SESet.empty)
+                | _ -> SESet.empty
+              else SESet.empty
+            in
+            let g_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (_, Some p) -> GESet.singleton p
+                | Loc (l, None) ->
+                  if Hashtbl.mem abs_mem l then Hashtbl.find abs_mem l
+                  else GESet.empty
+                | p -> GESet.singleton p
+              else GESet.empty
+            in
+            update_loc loc c_set;
+            update_abs_loc loc g_set
+          | _ -> ())
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
+    | Fld (Var x, (Some k, Some i)) ->
+      GESet.iter
+        (function
+          | Top -> update_abs_loc loc (GESet.singleton Top)
+          | Ctor_pat (Some k', arr) when k = k' ->
+            let c_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (l, _) ->
+                  SESet.filter
+                    (function
+                      | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                      | App_V (Prim p, l) ->
+                        if p.prim_arity != arg_len l then true else false
+                      | _ -> false)
+                    (try Hashtbl.find mem l with _ -> SESet.empty)
+                | _ -> SESet.empty
+              else SESet.empty
+            in
+            let g_set =
+              if i < Array.length arr then
+                match arr.(i) with
+                | Loc (_, Some p) -> GESet.singleton p
+                | Loc (l, None) ->
+                  if Hashtbl.mem abs_mem l then Hashtbl.find abs_mem l
+                  else GESet.empty
+                | p -> GESet.singleton p
+              else GESet.empty
+            in
+            update_loc loc c_set;
+            update_abs_loc loc g_set
+          | _ -> ())
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
+    | Diff (Var x, p) -> update_abs_loc loc (filter_pat (Var x, p))
+    | _ -> ()
+  in
+  SESet.iter resolve set
+
+let step_mem () = Hashtbl.iter resolve_mem mem
+
+let solve () =
+  step_sc ();
+  step_mem ();
+  while !changed do
+    changed := false;
+    step_sc ();
+    step_mem ()
+  done
