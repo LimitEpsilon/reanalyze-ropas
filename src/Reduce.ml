@@ -79,36 +79,54 @@ let rec merge_args = function
 
 (* no support for arrays yet *)
 let rec filter_pat = function
-  | _, Top -> GESet.empty
-  | x, p when x = p -> GESet.empty
-  | x, Const c when x != Const c -> GESet.singleton x
-  | (Ctor_pat (kappa, _) as x), Ctor_pat (kappa', _) when kappa != kappa' ->
+  | _, Top ->
+    if !Common.Cli.debug then prerr_endline "rhs = Top";
+    GESet.empty
+  | x, p when x = p ->
+    if !Common.Cli.debug then prerr_endline "lhs = rhs";
+    GESet.empty
+  | x, Const c when x != Const c ->
+    if !Common.Cli.debug then prerr_endline "rhs = const";
+    GESet.singleton x
+  | (Ctor_pat (Some kappa, _) as x), Ctor_pat (Some kappa', _)
+    when kappa != kappa' ->
+    if !Common.Cli.debug then (
+      prerr_endline "lhs, rhs = ctor, no filter";
+      prerr_string "lhs: ";
+      prerr_endline kappa;
+      prerr_string "rhs: ";
+      prerr_endline kappa');
     GESet.singleton x
   | Top, Ctor_pat (kappa, arr) ->
+    if !Common.Cli.debug then prerr_endline "lhs = Top, coerce into ctor";
     filter_pat
       (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
   | Var x, p when Hashtbl.mem grammar (Var x) ->
+    if !Common.Cli.debug then prerr_endline "lhs = var";
     GESet.fold
       (fun y acc -> GESet.union (filter_pat (y, p)) acc)
       (Hashtbl.find grammar (Var x))
       GESet.empty
-  | Loc (l, None), p when Hashtbl.mem abs_mem l ->
+  | Loc (l, None), p ->
+    if !Common.Cli.debug then prerr_endline "lhs = loc without pat";
     GESet.map
       (fun x -> Loc (l, Some x))
       (GESet.fold
          (fun y acc -> GESet.union (filter_pat (y, p)) acc)
-         (Hashtbl.find abs_mem l) GESet.empty)
+         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
+         GESet.empty)
   | Loc (l, Some p), p' ->
+    if !Common.Cli.debug then prerr_endline "lhs = loc with pat";
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
-  | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr')
-    when kappa = kappa' && Array.length arr = Array.length arr' ->
+  | Ctor_pat (kappa, arr), Ctor_pat (_, arr')
+    when Array.length arr = Array.length arr' ->
+    if !Common.Cli.debug then prerr_endline "lhs, rhs = ctor, filter";
     let acc = ref GESet.empty in
     let i = ref 0 in
     let arr = Array.copy arr in
     let len = Array.length arr in
     while !i < len do
       let ith = filter_pat (arr.(!i), arr'.(!i)) in
-      if GESet.is_empty ith then prerr_string "empty\n";
       let set =
         GESet.map
           (fun x ->
@@ -122,7 +140,9 @@ let rec filter_pat = function
       incr i
     done;
     !acc
-  | _ -> GESet.empty
+  | _ ->
+    if !Common.Cli.debug then prerr_endline "else";
+    GESet.empty
 
 let allocated = ref SESet.empty
 
@@ -328,7 +348,12 @@ let resolve_var var set =
             update_g (Var var) g_set
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
-    | Diff (Var x, p) -> update_g (Var var) (filter_pat (Var x, p))
+    | Diff (Var x, p) ->
+      (if !Common.Cli.debug then
+       match x with
+       | Val (Expr_var x) -> prerr_endline (CL.Ident.name x)
+       | _ -> ());
+      update_g (Var var) (filter_pat (Var x, p))
     | _ -> ()
   in
   SESet.iter resolve set
@@ -432,10 +457,15 @@ let resolve_mem loc set =
           | Prim p ->
             update_loc loc
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
-          | Fn (Some _, l) ->
-            let exns = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
-            update_loc loc exns;
-            update_loc loc (SESet.singleton (Var y))
+          | Fn (Some x, l) ->
+            let app_p =
+              if tl != [] then
+                SESet.of_list (List.map (fun e -> App_P (Var (Val e), tl)) l)
+              else SESet.empty
+            in
+            let body_p = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
+            update_loc loc (SESet.union app_p body_p);
+            update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
           | App_V (Prim p, l) ->
             let app =
               SESet.singleton
