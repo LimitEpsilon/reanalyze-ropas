@@ -70,11 +70,6 @@ let resolve_to_be_resolved () =
   in
   Hashtbl.iter resolve to_be_resolved
 
-let exn_of_file = Hashtbl.create 10
-
-let update_exn_of_file (key : string) (data : value se list) =
-  Hashtbl.add exn_of_file key data
-
 let traverse_ast () =
   let super = Tast_mapper.default in
   let expr (self : Tast_mapper.mapper) (expr : Typedtree.expression) =
@@ -116,4 +111,4 @@ let reportResults ~ppf:_ =
   resolve_to_be_resolved ();
   solve ();
   PrintSE.print_result ();
-  if !Common.Cli.debug then PrintSE.print_sc_info ()
+  if !Common.Cli.debug then PrintSE.print_grammar ()

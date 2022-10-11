@@ -306,14 +306,64 @@ let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
         data)
     a
 
+let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
+  Hashtbl.iter
+    (fun key data ->
+      prerr_string "exceptions in file ";
+      prerr_string key;
+      prerr_newline ();
+      List.iter
+        (function
+          | Var x ->
+            let set =
+              try Hashtbl.find grammar (Var x) with _ -> GESet.empty
+            in
+            if GESet.is_empty set then ()
+            else (
+              prerr_string "\tfrom ";
+              print_tagged_expr x;
+              prerr_endline ":";
+              GESet.iter
+                (fun x ->
+                  prerr_string "\t\t";
+                  print_pattern x;
+                  prerr_newline ())
+                set)
+          | _ -> ())
+        data)
+    tbl
+
+let show_closure_analysis tbl =
+  Hashtbl.iter
+    (fun key data ->
+      if SESet.is_empty data then ()
+      else (
+        prerr_string "closure analysis for: ";
+        print_se key;
+        prerr_newline ();
+        SESet.iter
+          (fun x ->
+            match x with
+            | App_V (_, _) | Fn (_, _) | Prim _ ->
+              prerr_string "\t";
+              print_se x;
+              prerr_newline ()
+            | _ -> ())
+          data))
+    tbl
+
 let print_sc_info () =
   show_mem mem;
   show_var_se_tbl var_to_se;
   show_sc_tbl sc
 
-let print_result () =
+let print_grammar () =
   show_abs_mem abs_mem;
   show_grammar grammar
+
+let print_result () =
+  show_exn_of_file exn_of_file;
+  show_closure_analysis sc
 
 let count = ref 0
 

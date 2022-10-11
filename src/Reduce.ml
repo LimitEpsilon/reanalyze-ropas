@@ -1,6 +1,10 @@
 open SetExpression
 
 let changed = ref false
+let exn_of_file = Hashtbl.create 10
+
+let update_exn_of_file (key : string) (data : value se list) =
+  Hashtbl.add exn_of_file key data
 
 module GE = struct
   type t = pattern se
@@ -378,12 +382,13 @@ let resolve_update (var, i) set =
           if i < Array.length arr then
             match arr.(i) with
             | Loc (l, Some _) ->
-              update_loc l set;
               let temp = Array.copy arr in
               temp.(i) <- Loc (l, None);
               let temp_pat = Ctor_pat (k, temp) in
               if GESet.mem temp_pat p_set then ()
-              else update_g (Var var) (GESet.singleton temp_pat)
+              else (
+                update_loc l set;
+                update_g (Var var) (GESet.singleton temp_pat))
             | Loc (l, None) -> update_loc l set
             | _ -> ())
         | _ -> ())
