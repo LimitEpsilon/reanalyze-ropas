@@ -14,6 +14,8 @@ let posToString (pos : Lexing.position) =
 module Cli = struct
   let debug = ref false
   let ci = ref false
+  let closure = ref false
+  let debug_pat = ref false
 
   (** The command was a -cmt variant (e.g. -exception-cmt) *)
   let cmtCommand = ref false

@@ -31,6 +31,16 @@ let string_of_relop : relop -> string = function
     | GT -> ">"
     | GE -> ">=")
 
+module Int = struct
+  type t = int
+
+  let compare = compare
+end
+
+module IntSet = Set.Make (Int)
+
+let to_be_explained = ref IntSet.empty
+
 let print_code_loc loc =
   CL.Location.print_loc Format.str_formatter loc;
   prerr_string (Format.flush_str_formatter ())
@@ -146,7 +156,9 @@ and print_pattern : pattern se -> unit = function
     prerr_string "(";
     prerr_int i;
     prerr_string ", ";
-    (match p with Some p -> print_pattern p | _ -> ());
+    (match p with
+    | Some p -> print_pattern p
+    | _ -> to_be_explained := IntSet.add i !to_be_explained);
     prerr_string ")"
   | _ -> ()
 
@@ -235,6 +247,22 @@ and print_arr_with_separator arr sep =
 (*       prerr_newline ()) *)
 (*     env_map *)
 
+let show_se_with_separator set sep =
+  SESet.iter
+    (fun x ->
+      prerr_string sep;
+      print_se x;
+      prerr_newline ())
+    set
+
+let show_pattern_with_separator set sep =
+  GESet.iter
+    (fun x ->
+      prerr_string sep;
+      print_pattern x;
+      prerr_newline ())
+    set
+
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   Hashtbl.iter
     (fun x se ->
@@ -242,68 +270,61 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string (CL.Ident.unique_name x);
       prerr_string "\n se = ";
       prerr_newline ();
-      SESet.iter
-        (fun x ->
-          print_se x;
-          prerr_newline ())
-        se)
+      show_se_with_separator se "\t";
+      print_newline ())
     var_to_se
 
 let show_mem (mem : (int, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "mem :\n";
-      prerr_int key;
-      prerr_newline ();
-      SESet.iter
-        (fun x ->
-          print_se x;
-          prerr_newline ())
-        data)
+      if SESet.is_empty data then ()
+      else (
+        prerr_string "mem :\n";
+        prerr_int key;
+        prerr_newline ();
+        show_se_with_separator data "\t";
+        print_newline ()))
     mem
 
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "sc :\n";
-      print_se key;
-      (match key with
-      | Fld (_, _) -> prerr_string " <- "
-      | _ -> prerr_string " = ");
-      prerr_newline ();
-      SESet.iter
-        (fun x ->
-          print_se x;
-          prerr_newline ())
-        data)
+      if SESet.is_empty data then ()
+      else (
+        prerr_string "sc :\n";
+        print_se key;
+        (match key with
+        | Fld (_, _) -> prerr_string " <- "
+        | _ -> prerr_string " = ");
+        prerr_newline ();
+        show_se_with_separator data "\t";
+        print_newline ()))
     tbl
 
 let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "grammar :\n";
-      print_pattern key;
-      prerr_string " = ";
-      prerr_newline ();
-      GESet.iter
-        (fun x ->
-          print_pattern x;
-          prerr_newline ())
-        data)
+      if GESet.is_empty data then ()
+      else (
+        prerr_string "grammar :\n";
+        print_pattern key;
+        prerr_string " = ";
+        prerr_newline ();
+        show_pattern_with_separator data "\t";
+        print_newline ()))
     g
 
 let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "abs_mem :\n";
-      prerr_int key;
-      prerr_string " = ";
-      prerr_newline ();
-      GESet.iter
-        (fun x ->
-          print_pattern x;
-          prerr_newline ())
-        data)
+      if GESet.is_empty data then ()
+      else (
+        prerr_string "abs_mem :\n";
+        prerr_int key;
+        prerr_string " = ";
+        prerr_newline ();
+        show_pattern_with_separator data "\t";
+        print_newline ()))
     a
 
 let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
@@ -323,34 +344,44 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
               prerr_string "\tfrom ";
               print_tagged_expr x;
               prerr_endline ":";
-              GESet.iter
-                (fun x ->
-                  prerr_string "\t\t";
-                  print_pattern x;
-                  prerr_newline ())
-                set)
+              show_pattern_with_separator set "\t\t";
+              print_newline ())
           | _ -> ())
         data)
     tbl
 
 let show_closure_analysis tbl =
+  prerr_endline "Closure analysis:";
   Hashtbl.iter
     (fun key data ->
-      if SESet.is_empty data then ()
-      else (
-        prerr_string "closure analysis for: ";
-        print_se key;
-        prerr_newline ();
-        SESet.iter
+      let set =
+        SESet.filter
           (fun x ->
             match x with
-            | App_V (_, _) | Fn (_, _) | Prim _ ->
-              prerr_string "\t";
-              print_se x;
-              prerr_newline ()
-            | _ -> ())
-          data))
+            | App_V (_, _) | Fn (_, _) | Prim _ -> true
+            | _ -> false)
+          data
+      in
+      if SESet.is_empty set then ()
+      else (
+        print_se key;
+        prerr_newline ();
+        show_se_with_separator set "\t";
+        prerr_newline ()))
     tbl
+
+let explain_abs_mem () =
+  prerr_endline "where abstract locations contain:";
+  IntSet.iter
+    (fun i ->
+      let set = try Hashtbl.find abs_mem i with _ -> GESet.empty in
+      prerr_string "\tlocation ";
+      prerr_int i;
+      prerr_newline ();
+      show_pattern_with_separator set "\t\t";
+      print_newline ())
+    !to_be_explained;
+  to_be_explained := IntSet.empty
 
 let print_sc_info () =
   show_mem mem;
@@ -361,13 +392,19 @@ let print_grammar () =
   show_abs_mem abs_mem;
   show_grammar grammar
 
-let print_result () =
+let print_exa () =
+  Format.flush_str_formatter () |> ignore;
   show_exn_of_file exn_of_file;
+  explain_abs_mem ()
+
+let print_closure () =
+  Format.flush_str_formatter () |> ignore;
   show_closure_analysis sc
 
 let count = ref 0
 
 let solve () =
+  changed := false;
   step_sc ();
   step_mem ();
   while !changed do
@@ -375,5 +412,5 @@ let solve () =
     step_sc ();
     step_mem ();
     incr count;
-    if !count > 25 then print_result ()
+    if !count > 25 then print_exa ()
   done

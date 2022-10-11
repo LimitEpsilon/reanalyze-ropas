@@ -110,5 +110,6 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
 let reportResults ~ppf:_ =
   resolve_to_be_resolved ();
   solve ();
-  PrintSE.print_result ();
+  if !Common.Cli.closure then PrintSE.print_closure ()
+  else PrintSE.print_exa ();
   if !Common.Cli.debug then PrintSE.print_grammar ()

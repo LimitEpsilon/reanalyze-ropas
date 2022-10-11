@@ -96,16 +96,16 @@ let rec merge_args = function
 (* no support for arrays yet *)
 let rec filter_pat = function
   | _, Top ->
-    if !Common.Cli.debug then prerr_endline "rhs = Top";
+    if !Common.Cli.debug_pat then prerr_endline "rhs = Top";
     GESet.empty
   | x, p when x = p ->
-    if !Common.Cli.debug then prerr_endline "lhs = rhs";
+    if !Common.Cli.debug_pat then prerr_endline "lhs = rhs";
     GESet.empty
   | x, Const c when x <> Const c ->
-    if !Common.Cli.debug then prerr_endline "rhs = const";
+    if !Common.Cli.debug_pat then prerr_endline "rhs = const";
     GESet.singleton x
   | (Ctor_pat (kappa, _) as x), Ctor_pat (kappa', _) when kappa <> kappa' ->
-    if !Common.Cli.debug then (
+    if !Common.Cli.debug_pat then (
       prerr_endline "lhs, rhs = ctor, no filter";
       prerr_string "lhs: ";
       (match kappa with Some s -> prerr_endline s | _ -> prerr_newline ());
@@ -113,17 +113,17 @@ let rec filter_pat = function
       match kappa' with Some s -> prerr_endline s | _ -> prerr_newline ());
     GESet.singleton x
   | Top, Ctor_pat (kappa, arr) ->
-    if !Common.Cli.debug then prerr_endline "lhs = Top, coerce into ctor";
+    if !Common.Cli.debug_pat then prerr_endline "lhs = Top, coerce into ctor";
     filter_pat
       (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
   | Var x, p when Hashtbl.mem grammar (Var x) ->
-    if !Common.Cli.debug then prerr_endline "lhs = var";
+    if !Common.Cli.debug_pat then prerr_endline "lhs = var";
     GESet.fold
       (fun y acc -> GESet.union (filter_pat (y, p)) acc)
       (Hashtbl.find grammar (Var x))
       GESet.empty
   | Loc (l, None), p ->
-    if !Common.Cli.debug then prerr_endline "lhs = loc without pat";
+    if !Common.Cli.debug_pat then prerr_endline "lhs = loc without pat";
     GESet.map
       (fun x -> Loc (l, Some x))
       (GESet.fold
@@ -131,11 +131,11 @@ let rec filter_pat = function
          (try Hashtbl.find abs_mem l with _ -> GESet.empty)
          GESet.empty)
   | Loc (l, Some p), p' ->
-    if !Common.Cli.debug then prerr_endline "lhs = loc with pat";
+    if !Common.Cli.debug_pat then prerr_endline "lhs = loc with pat";
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
   | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr')
     when kappa = kappa' && Array.length arr = Array.length arr' ->
-    if !Common.Cli.debug then prerr_endline "lhs, rhs = ctor, filter";
+    if !Common.Cli.debug_pat then prerr_endline "lhs, rhs = ctor, filter";
     let acc = ref GESet.empty in
     let i = ref 0 in
     let arr = Array.copy arr in
@@ -156,7 +156,7 @@ let rec filter_pat = function
     done;
     !acc
   | _ ->
-    if !Common.Cli.debug then prerr_endline "else";
+    if !Common.Cli.debug_pat then prerr_endline "else";
     GESet.empty
 
 let allocated = ref SESet.empty
@@ -364,7 +364,7 @@ let resolve_var var set =
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
     | Diff (Var x, p) ->
-      (if !Common.Cli.debug then
+      (if !Common.Cli.debug_pat then
        match x with
        | Val (Expr_var x) -> prerr_endline (CL.Ident.name x)
        | _ -> ());

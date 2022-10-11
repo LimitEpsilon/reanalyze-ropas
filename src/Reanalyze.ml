@@ -95,6 +95,7 @@ let runAnalysis ~cmtRoot ~ppf =
     DeadOptionalArgs.forceDelayedItems ();
     DeadCommon.reportDead ~checkOptionalArg:DeadOptionalArgs.check ppf;
     DeadCommon.WriteDeadAnnotations.write ());
+  if !Cli.closure then Exception.reportResults ~ppf;
   if runConfig.exception_ then Exception.reportResults ~ppf;
   if runConfig.noalloc then Noalloc.reportResults ~ppf;
   if runConfig.termination then Arnold.reportResults ~ppf;
@@ -142,9 +143,18 @@ let cli () =
         "root_path Run all the analyses for all the .cmt files under the root \
          path" );
       ("-ci", Unit (fun () -> Cli.ci := true), "Internal flag for use in CI");
+      ( "-closure",
+        String
+          (fun s ->
+            Cli.closure := true;
+            setException (Some s)),
+        "Closure analysis" );
       ("-config", Unit setConfig, "Read the analysis mode from bsconfig.json");
       ("-dce", Unit (fun () -> setDCE None), "Eperimental DCE");
       ("-debug", Unit (fun () -> Cli.debug := true), "Print debug information");
+      ( "-debug-pat",
+        Unit (fun () -> Cli.debug_pat := true),
+        "Debug pattern filtering" );
       ( "-dce-cmt",
         String (fun s -> setDCE (Some s)),
         "root_path Experimental DCE for all the .cmt files under the root path"
