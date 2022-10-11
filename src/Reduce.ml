@@ -53,7 +53,13 @@ let rec filter_pat = function
           ith
       in
       acc := GESet.union !acc set;
-      arr.(!i) <- arr'.(!i);
+      (if arr'.(!i) <> Top then
+       let update_with =
+         match arr.(!i) with
+         | Loc (l, _) -> Loc (l, Some arr'.(!i))
+         | _ -> arr'.(!i)
+       in
+       arr.(!i) <- update_with);
       incr i
     done;
     !acc
@@ -119,7 +125,13 @@ let rec filter_pat_debug (x, y) =
           ith
       in
       acc := GESet.union !acc set;
-      arr.(!i) <- arr'.(!i);
+      (if arr'.(!i) <> Top then
+       let update_with =
+         match arr.(!i) with
+         | Loc (l, _) -> Loc (l, Some arr'.(!i))
+         | _ -> arr'.(!i)
+       in
+       arr.(!i) <- update_with);
       incr i
     done;
     !acc
