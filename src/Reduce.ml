@@ -374,12 +374,16 @@ let resolve_update (var, i) set =
   | p_set ->
     GESet.iter
       (function
-        | Ctor_pat (_, arr) -> (
+        | Ctor_pat (k, arr) -> (
           if i < Array.length arr then
             match arr.(i) with
             | Loc (l, Some _) ->
-              arr.(i) <- Loc (l, None);
-              update_loc l set
+              update_loc l set;
+              let temp = Array.copy arr in
+              temp.(i) <- Loc (l, None);
+              let temp_pat = Ctor_pat (k, temp) in
+              if GESet.mem temp_pat p_set then ()
+              else update_g (Var var) (GESet.singleton temp_pat)
             | Loc (l, None) -> update_loc l set
             | _ -> ())
         | _ -> ())
