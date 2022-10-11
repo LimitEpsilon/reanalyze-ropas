@@ -271,7 +271,7 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_string "\n se = ";
       prerr_newline ();
       show_se_with_separator se "\t";
-      print_newline ())
+      prerr_newline ())
     var_to_se
 
 let show_mem (mem : (int, SESet.t) Hashtbl.t) =
@@ -283,7 +283,7 @@ let show_mem (mem : (int, SESet.t) Hashtbl.t) =
         prerr_int key;
         prerr_newline ();
         show_se_with_separator data "\t";
-        print_newline ()))
+        prerr_newline ()))
     mem
 
 let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
@@ -298,7 +298,7 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
         | _ -> prerr_string " = ");
         prerr_newline ();
         show_se_with_separator data "\t";
-        print_newline ()))
+        prerr_newline ()))
     tbl
 
 let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
@@ -311,7 +311,7 @@ let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
         prerr_string " = ";
         prerr_newline ();
         show_pattern_with_separator data "\t";
-        print_newline ()))
+        prerr_newline ()))
     g
 
 let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
@@ -324,7 +324,7 @@ let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
         prerr_string " = ";
         prerr_newline ();
         show_pattern_with_separator data "\t";
-        print_newline ()))
+        prerr_newline ()))
     a
 
 let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
@@ -345,7 +345,7 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
               print_tagged_expr x;
               prerr_endline ":";
               show_pattern_with_separator set "\t\t";
-              print_newline ())
+              prerr_newline ())
           | _ -> ())
         data)
     tbl
@@ -379,7 +379,7 @@ let explain_abs_mem () =
       prerr_int i;
       prerr_newline ();
       show_pattern_with_separator set "\t\t";
-      print_newline ())
+      prerr_newline ())
     !to_be_explained;
   to_be_explained := IntSet.empty
 
