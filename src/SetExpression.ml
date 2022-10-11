@@ -730,3 +730,86 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 (* tast_mapper connects val/exns returned by se_of_something with the code_loc of the AST node *)
 (* var_to_se) correlates ident to se set_constraints) correlates location to se *)
 (* after all cmt files are processed, lookup to_be_resolved to resolve Path.t. *)
+
+(* for resolution *)
+let changed = ref false
+let exn_of_file = Hashtbl.create 10
+
+module GE = struct
+  type t = pattern se
+
+  let compare = compare
+end
+
+module GESet = Set.Make (GE)
+
+let update_exn_of_file (key : string) (data : value se list) =
+  Hashtbl.add exn_of_file key data
+
+let update_c key set =
+  if Hashtbl.mem sc key then
+    let original = Hashtbl.find sc key in
+    if SESet.mem Top original then ()
+    else
+      let diff = SESet.diff set original in
+      if SESet.is_empty diff then ()
+      else (
+        Hashtbl.remove sc key;
+        if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
+        else Hashtbl.add sc key (SESet.union original diff);
+        changed := true)
+  else (
+    Hashtbl.add sc key set;
+    changed := true)
+
+let update_loc key set =
+  if Hashtbl.mem mem key then
+    let original = Hashtbl.find mem key in
+    if SESet.mem Top original then ()
+    else
+      let diff = SESet.diff set original in
+      if SESet.is_empty diff then ()
+      else (
+        Hashtbl.remove mem key;
+        if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
+        else Hashtbl.add mem key (SESet.union original diff);
+        changed := true)
+  else (
+    Hashtbl.add mem key set;
+    changed := true)
+
+let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
+
+let update_g key set =
+  if Hashtbl.mem grammar key then
+    let original = Hashtbl.find grammar key in
+    if GESet.mem Top original then ()
+    else
+      let diff = GESet.diff set original in
+      if GESet.is_empty diff then ()
+      else (
+        Hashtbl.remove grammar key;
+        if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
+        else Hashtbl.add grammar key (GESet.union original diff);
+        changed := true)
+  else (
+    Hashtbl.add grammar key set;
+    changed := true)
+
+let abs_mem : (int, GESet.t) Hashtbl.t = Hashtbl.create 256
+
+let update_abs_loc key set =
+  if Hashtbl.mem abs_mem key then
+    let original = Hashtbl.find abs_mem key in
+    if GESet.mem Top original then ()
+    else
+      let diff = GESet.diff set original in
+      if GESet.is_empty diff then ()
+      else (
+        Hashtbl.remove abs_mem key;
+        if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
+        else Hashtbl.add abs_mem key (GESet.union original diff);
+        changed := true)
+  else (
+    Hashtbl.add abs_mem key set;
+    changed := true)

@@ -1,5 +1,4 @@
 open SetExpression
-open Reduce
 
 let string_of_arithop : arithop -> string = function
   | INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x -> (
@@ -401,16 +400,3 @@ let print_closure () =
   Format.flush_str_formatter () |> ignore;
   show_closure_analysis sc
 
-let count = ref 0
-
-let solve () =
-  changed := false;
-  step_sc ();
-  step_mem ();
-  while !changed do
-    changed := false;
-    step_sc ();
-    step_mem ();
-    incr count;
-    if !count > 25 then print_exa ()
-  done

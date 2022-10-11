@@ -1,86 +1,5 @@
 open SetExpression
-
-let changed = ref false
-let exn_of_file = Hashtbl.create 10
-
-let update_exn_of_file (key : string) (data : value se list) =
-  Hashtbl.add exn_of_file key data
-
-module GE = struct
-  type t = pattern se
-
-  let compare = compare
-end
-
-module GESet = Set.Make (GE)
-
-let update_c key set =
-  if Hashtbl.mem sc key then
-    let original = Hashtbl.find sc key in
-    if SESet.mem Top original then ()
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then ()
-      else (
-        Hashtbl.remove sc key;
-        if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
-        else Hashtbl.add sc key (SESet.union original diff);
-        changed := true)
-  else (
-    Hashtbl.add sc key set;
-    changed := true)
-
-let update_loc key set =
-  if Hashtbl.mem mem key then
-    let original = Hashtbl.find mem key in
-    if SESet.mem Top original then ()
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then ()
-      else (
-        Hashtbl.remove mem key;
-        if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
-        else Hashtbl.add mem key (SESet.union original diff);
-        changed := true)
-  else (
-    Hashtbl.add mem key set;
-    changed := true)
-
-let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
-
-let update_g key set =
-  if Hashtbl.mem grammar key then
-    let original = Hashtbl.find grammar key in
-    if GESet.mem Top original then ()
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then ()
-      else (
-        Hashtbl.remove grammar key;
-        if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
-        else Hashtbl.add grammar key (GESet.union original diff);
-        changed := true)
-  else (
-    Hashtbl.add grammar key set;
-    changed := true)
-
-let abs_mem : (int, GESet.t) Hashtbl.t = Hashtbl.create 256
-
-let update_abs_loc key set =
-  if Hashtbl.mem abs_mem key then
-    let original = Hashtbl.find abs_mem key in
-    if GESet.mem Top original then ()
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then ()
-      else (
-        Hashtbl.remove abs_mem key;
-        if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
-        else Hashtbl.add abs_mem key (GESet.union original diff);
-        changed := true)
-  else (
-    Hashtbl.add abs_mem key set;
-    changed := true)
+open PrintSE
 
 let rec arg_len = function
   | [] -> 0
@@ -95,35 +14,20 @@ let rec merge_args = function
 
 (* no support for arrays yet *)
 let rec filter_pat = function
-  | _, Top ->
-    if !Common.Cli.debug_pat then prerr_endline "rhs = Top";
-    GESet.empty
-  | x, p when x = p ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs = rhs";
-    GESet.empty
-  | x, Const c when x <> Const c ->
-    if !Common.Cli.debug_pat then prerr_endline "rhs = const";
-    GESet.singleton x
+  | _, Top -> GESet.empty
+  | x, p when x = p -> GESet.empty
+  | x, Const c when x <> Const c -> GESet.singleton x
   | (Ctor_pat (kappa, _) as x), Ctor_pat (kappa', _) when kappa <> kappa' ->
-    if !Common.Cli.debug_pat then (
-      prerr_endline "lhs, rhs = ctor, no filter";
-      prerr_string "lhs: ";
-      (match kappa with Some s -> prerr_endline s | _ -> prerr_newline ());
-      prerr_string "rhs: ";
-      match kappa' with Some s -> prerr_endline s | _ -> prerr_newline ());
     GESet.singleton x
   | Top, Ctor_pat (kappa, arr) ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs = Top, coerce into ctor";
     filter_pat
       (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
   | Var x, p when Hashtbl.mem grammar (Var x) ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs = var";
     GESet.fold
       (fun y acc -> GESet.union (filter_pat (y, p)) acc)
       (Hashtbl.find grammar (Var x))
       GESet.empty
   | Loc (l, None), p ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs = loc without pat";
     GESet.map
       (fun x -> Loc (l, Some x))
       (GESet.fold
@@ -131,11 +35,9 @@ let rec filter_pat = function
          (try Hashtbl.find abs_mem l with _ -> GESet.empty)
          GESet.empty)
   | Loc (l, Some p), p' ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs = loc with pat";
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
   | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr')
     when kappa = kappa' && Array.length arr = Array.length arr' ->
-    if !Common.Cli.debug_pat then prerr_endline "lhs, rhs = ctor, filter";
     let acc = ref GESet.empty in
     let i = ref 0 in
     let arr = Array.copy arr in
@@ -155,8 +57,74 @@ let rec filter_pat = function
       incr i
     done;
     !acc
+  | _ -> GESet.empty
+
+let rec filter_pat_debug (x, y) =
+  prerr_string "\t";
+  print_pattern x;
+  prerr_newline ();
+  prerr_string "\t";
+  print_pattern y;
+  prerr_newline ();
+  prerr_string "\t\t";
+  match (x, y) with
+  | _, Top ->
+    prerr_endline "rhs = Top";
+    GESet.empty
+  | x, p when x = p ->
+    prerr_endline "lhs = rhs";
+    GESet.empty
+  | x, Const c when x <> Const c ->
+    prerr_endline "rhs = const";
+    GESet.singleton x
+  | (Ctor_pat (kappa, _) as x), Ctor_pat (kappa', _) when kappa <> kappa' ->
+    prerr_endline "lhs, rhs = ctor, no filter";
+    GESet.singleton x
+  | Top, Ctor_pat (kappa, arr) ->
+    prerr_endline "lhs = Top, coerce into ctor";
+    filter_pat_debug
+      (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
+  | Var x, p when Hashtbl.mem grammar (Var x) ->
+    prerr_endline "lhs = var";
+    GESet.fold
+      (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
+      (Hashtbl.find grammar (Var x))
+      GESet.empty
+  | Loc (l, None), p ->
+    prerr_endline "lhs = loc without pat";
+    GESet.map
+      (fun x -> Loc (l, Some x))
+      (GESet.fold
+         (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
+         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
+         GESet.empty)
+  | Loc (l, Some p), p' ->
+    prerr_endline "lhs = loc with pat";
+    GESet.map (fun x -> Loc (l, Some x)) (filter_pat_debug (p, p'))
+  | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr')
+    when kappa = kappa' && Array.length arr = Array.length arr' ->
+    prerr_endline "lhs, rhs = ctor, filter";
+    let acc = ref GESet.empty in
+    let i = ref 0 in
+    let arr = Array.copy arr in
+    let len = Array.length arr in
+    while !i < len do
+      let ith = filter_pat_debug (arr.(!i), arr'.(!i)) in
+      let set =
+        GESet.map
+          (fun x ->
+            let temp = Array.copy arr in
+            temp.(!i) <- x;
+            Ctor_pat (kappa, temp))
+          ith
+      in
+      acc := GESet.union !acc set;
+      arr.(!i) <- arr'.(!i);
+      incr i
+    done;
+    !acc
   | _ ->
-    if !Common.Cli.debug_pat then prerr_endline "else";
+    prerr_endline "else";
     GESet.empty
 
 let allocated = ref SESet.empty
@@ -364,11 +332,12 @@ let resolve_var var set =
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
     | Diff (Var x, p) ->
-      (if !Common.Cli.debug_pat then
-       match x with
-       | Val (Expr_var x) -> prerr_endline (CL.Ident.name x)
-       | _ -> ());
-      update_g (Var var) (filter_pat (Var x, p))
+      if !Common.Cli.debug_pat then (
+        (match x with
+        | Val (Expr_var x) -> prerr_endline (CL.Ident.name x)
+        | _ -> ());
+        update_g (Var var) (filter_pat_debug (Var x, p)))
+      else update_g (Var var) (filter_pat (Var x, p))
     | _ -> ()
   in
   SESet.iter resolve set
@@ -378,19 +347,9 @@ let resolve_update (var, i) set =
   | p_set ->
     GESet.iter
       (function
-        | Ctor_pat (k, arr) -> (
+        | Ctor_pat (_, arr) -> (
           if i < Array.length arr then
-            match arr.(i) with
-            | Loc (l, Some _) ->
-              let temp = Array.copy arr in
-              temp.(i) <- Loc (l, None);
-              let temp_pat = Ctor_pat (k, temp) in
-              if GESet.mem temp_pat p_set then ()
-              else (
-                update_loc l set;
-                update_g (Var var) (GESet.singleton temp_pat))
-            | Loc (l, None) -> update_loc l set
-            | _ -> ())
+            match arr.(i) with Loc (l, _) -> update_loc l set | _ -> ())
         | _ -> ())
       p_set
   | exception _ -> ()
@@ -573,6 +532,7 @@ let resolve_mem loc set =
 let step_mem () = Hashtbl.iter resolve_mem mem
 
 let solve () =
+  changed := false;
   step_sc ();
   step_mem ();
   while !changed do

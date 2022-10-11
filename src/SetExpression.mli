@@ -109,3 +109,20 @@ val se_of_module_expr :
  *   ('a CL.Typedtree.general_pattern * bool) * CL.Typedtree.expression *)
 
 val se_of_expr : CL.Typedtree.expression -> value se list * value se list
+
+
+(* for resolution *)
+val changed : bool ref
+val exn_of_file : (string, value se list) Hashtbl.t
+
+module GESet : Set.S with type elt = pattern se
+
+val update_exn_of_file : string -> value se list -> unit
+val update_c : value se -> SESet.t -> unit
+val update_loc : int -> SESet.t -> unit
+
+val grammar : (pattern se, GESet.t) Hashtbl.t
+val update_g : pattern se -> GESet.t -> unit
+
+val abs_mem : (int, GESet.t) Hashtbl.t
+val update_abs_loc : int -> GESet.t -> unit
