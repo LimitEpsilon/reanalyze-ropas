@@ -354,14 +354,12 @@ let resolve_var var set =
 let back_propagated_vars = ref SESet.empty
 
 let rec auxiliary_back_propagate var =
-  let before = !back_propagated_vars in
-  back_propagated_vars := SESet.union (SESet.singleton var) before;
-  let after = !back_propagated_vars in
-  if SESet.equal before after then ()
-  else
+  if SESet.mem var !back_propagated_vars then ()
+  else (
+    back_propagated_vars := SESet.add var !back_propagated_vars;
     SESet.iter
       (function Var x -> auxiliary_back_propagate (Var x) | _ -> ())
-      (try Hashtbl.find sc var with _ -> SESet.empty)
+      (try Hashtbl.find sc var with _ -> SESet.empty))
 
 let back_propagate var set =
   back_propagated_vars := SESet.empty;
