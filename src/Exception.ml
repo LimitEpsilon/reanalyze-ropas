@@ -102,6 +102,7 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
+    current_file := (Hashtbl.create 10);
     update_var id v;
     update_exn_of_file filename p;
     structure |> process_structure

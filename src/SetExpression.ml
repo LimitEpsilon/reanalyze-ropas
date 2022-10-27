@@ -123,6 +123,7 @@ end
 
 module SESet = Set.Make (SE)
 
+let current_file : (Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_sc key data =
@@ -139,6 +140,7 @@ let var_to_se : var_se_tbl = Hashtbl.create 256
 
 let update_var key data =
   let set = SESet.of_list data in
+  Hashtbl.add !current_file key set;
   if Hashtbl.mem var_to_se key then (
     let original = Hashtbl.find var_to_se key in
     Hashtbl.remove var_to_se key;
@@ -560,6 +562,12 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let p = List.flatten p in
     ([val_of_expr e], packet_of_expr e :: p)
   | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
+  | Texp_ident (CL.Path.Pident x, _, _) -> (
+    match Hashtbl.find !current_file x with
+    | set -> (SESet.elements set, [])
+    | exception Not_found ->
+      update_to_be (loc_of_expr expr) (Pident x);
+      ([], []))
   | Texp_ident (x, _, _) ->
     update_to_be (loc_of_expr expr) x;
     ([], [])

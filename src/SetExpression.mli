@@ -72,6 +72,7 @@ val new_temp_var : unit -> param expr
 
 module SESet : Set.S with type elt = value se
 
+val current_file : (Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
 val mem : (int, SESet.t) Hashtbl.t
