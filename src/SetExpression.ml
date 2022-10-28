@@ -123,7 +123,7 @@ end
 
 module SESet = Set.Make (SE)
 
-let current_file : (Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
+let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_sc key data =
