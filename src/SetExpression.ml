@@ -1,14 +1,15 @@
 [%%import "../config.h"]
 
 type expr_summary = {
-  exp_summary_desc : CL.Typedtree.expression_desc;
-  exp_summary_loc : CL.Location.t;
+  exp_type : CL.Types.type_expr;
+  exp_loc : CL.Location.t;
 }
 
 type mod_summary = {
-  mod_summary_desc : CL.Typedtree.module_expr_desc;
-  mod_summary_loc : CL.Location.t;
+  mod_type : CL.Types.module_type;
+  mod_loc : CL.Location.t;
 }
+
 
 type code_loc =
   | Expr_loc of expr_summary
@@ -207,8 +208,8 @@ let loc_to_expr : (int, CL.Location.t) Hashtbl.t = Hashtbl.create 10
 let loc_of_mod mod_expr =
   let summary =
     {
-      mod_summary_desc = mod_expr.CL.Typedtree.mod_desc;
-      mod_summary_loc = mod_expr.CL.Typedtree.mod_loc;
+      mod_type = mod_expr.CL.Typedtree.mod_type;
+      mod_loc = mod_expr.CL.Typedtree.mod_loc;
     }
   in
   match Hashtbl.find convert_tbl (Mod_loc summary) with
@@ -227,8 +228,8 @@ let packet_of_mod me = Var (Packet (expr_of_mod me))
 let loc_of_expr expr =
   let summary =
     {
-      exp_summary_desc = expr.CL.Typedtree.exp_desc;
-      exp_summary_loc = expr.CL.Typedtree.exp_loc;
+      exp_type = expr.CL.Typedtree.exp_type;
+      exp_loc = expr.CL.Typedtree.exp_loc;
     }
   in
   match Hashtbl.find convert_tbl (Expr_loc summary) with

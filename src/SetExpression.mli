@@ -1,11 +1,11 @@
 type expr_summary = {
-  exp_summary_desc : CL.Typedtree.expression_desc;
-  exp_summary_loc : CL.Location.t;
+  exp_type : CL.Types.type_expr;
+  exp_loc : CL.Location.t;
 }
 
 type mod_summary = {
-  mod_summary_desc : CL.Typedtree.module_expr_desc;
-  mod_summary_loc : CL.Location.t;
+  mod_type : CL.Types.module_type;
+  mod_loc : CL.Location.t;
 }
 
 type code_loc =

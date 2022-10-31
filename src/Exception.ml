@@ -4,33 +4,6 @@ open CL
 open SetExpression
 open Reduce
 
-let isApply : Types.value_description -> bool = function
-  | {val_kind = Val_prim {prim_name = "%apply"}} -> true
-  | _ -> false
-
-let isRevapply : Types.value_description -> bool = function
-  | {val_kind = Val_prim {prim_name = "%revapply"}} -> true
-  | _ -> false
-
-let string_of_prim : Types.value_description -> string = function
-  | {val_kind = Val_prim {prim_name = s1; prim_native_name = s2}} ->
-    Printf.sprintf "%s->%S" s1 s2
-  | _ -> ""
-
-let print_prim v = prerr_string @@ string_of_prim v ^ "\n"
-
-let isRaise : Types.value_description -> bool = function
-  | {
-      val_kind =
-        Val_prim
-          {
-            prim_name =
-              "%raise" | "%raise_notrace" | "%reraise" | "%raise_with_backtrace";
-          };
-    } ->
-    true (* do not consider second argument for raise_with_backtrace *)
-  | _ -> false
-
 let rec resolve_path (path : Path.t) =
   match path with
   | Pident x -> se_of_var x
@@ -60,8 +33,8 @@ let resolve_to_be_resolved () =
       if !Common.Cli.debug then (
         let loc =
           match loc with
-          | Expr_loc e -> e.exp_summary_loc
-          | Mod_loc m -> m.mod_summary_loc
+          | Expr_loc e -> e.exp_loc
+          | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
           | Converted_loc l -> Hashtbl.find loc_to_expr l
         in

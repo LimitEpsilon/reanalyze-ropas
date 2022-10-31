@@ -45,8 +45,8 @@ let print_code_loc loc =
   prerr_string (Format.flush_str_formatter ())
 
 let print_loc = function
-  | Expr_loc e -> print_code_loc e.exp_summary_loc
-  | Mod_loc m -> print_code_loc m.mod_summary_loc
+  | Expr_loc e -> print_code_loc e.exp_loc
+  | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
   | Converted_loc l -> print_code_loc (Hashtbl.find loc_to_expr l)
 
