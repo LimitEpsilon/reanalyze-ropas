@@ -60,9 +60,10 @@ let resolve_to_be_resolved () =
       if !Common.Cli.debug then (
         let loc =
           match loc with
-          | Expr_loc e -> e.exp_loc
-          | Mod_loc m -> m.mod_loc
+          | Expr_loc e -> e.exp_summary_loc
+          | Mod_loc m -> m.mod_summary_loc
           | Bop_loc t -> t.val_loc
+          | Converted_loc l -> Hashtbl.find loc_to_expr l
         in
         prerr_string "Look at : ";
         Location.print_loc Format.str_formatter loc;

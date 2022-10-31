@@ -1,7 +1,18 @@
+type expr_summary = {
+  exp_summary_desc : CL.Typedtree.expression_desc;
+  exp_summary_loc : CL.Location.t;
+}
+
+type mod_summary = {
+  mod_summary_desc : CL.Typedtree.module_expr_desc;
+  mod_summary_loc : CL.Location.t;
+}
+
 type code_loc =
-  | Expr_loc of CL.Typedtree.expression
-  | Mod_loc of CL.Typedtree.module_expr
+  | Expr_loc of expr_summary
+  | Mod_loc of mod_summary
   | Bop_loc of CL.Types.value_description
+  | Converted_loc of int
 
 and param = CL.Ident.t option
 and arg = value se option list
@@ -86,6 +97,8 @@ type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
 
 val to_be_resolved : to_be_resolved
 val update_to_be : code_loc -> CL.Path.t -> unit
+val convert_tbl : (code_loc, int) Hashtbl.t
+val loc_to_expr : (int, CL.Location.t) Hashtbl.t
 
 (* val list_rev_to_array : 'a list -> 'a -> 'a array *)
 (* val list_to_array : 'a list -> 'a -> 'a array *)
@@ -111,7 +124,6 @@ val se_of_module_expr :
 
 val se_of_expr : CL.Typedtree.expression -> value se list * value se list
 
-
 (* for resolution *)
 val changed : bool ref
 val exn_of_file : (string, value se list) Hashtbl.t
@@ -121,9 +133,7 @@ module GESet : Set.S with type elt = pattern se
 val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> unit
 val update_loc : int -> SESet.t -> unit
-
 val grammar : (pattern se, GESet.t) Hashtbl.t
 val update_g : pattern se -> GESet.t -> unit
-
 val abs_mem : (int, GESet.t) Hashtbl.t
 val update_abs_loc : int -> GESet.t -> unit

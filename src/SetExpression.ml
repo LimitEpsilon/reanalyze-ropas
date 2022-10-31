@@ -1,9 +1,20 @@
 [%%import "../config.h"]
 
+type expr_summary = {
+  exp_summary_desc : CL.Typedtree.expression_desc;
+  exp_summary_loc : CL.Location.t;
+}
+
+type mod_summary = {
+  mod_summary_desc : CL.Typedtree.module_expr_desc;
+  mod_summary_loc : CL.Location.t;
+}
+
 type code_loc =
-  | Expr_loc of CL.Typedtree.expression
-  | Mod_loc of CL.Typedtree.module_expr
+  | Expr_loc of expr_summary
+  | Mod_loc of mod_summary
   | Bop_loc of CL.Types.value_description
+  | Converted_loc of int
 
 and param = CL.Ident.t option (* use Texp_function's param *)
 and arg = value se option list
@@ -189,11 +200,46 @@ let se_of_var x =
   in
   se_list
 
-let loc_of_mod mod_expr = Mod_loc mod_expr
+let location = ref 0
+let convert_tbl : (code_loc, int) Hashtbl.t = Hashtbl.create 10
+let loc_to_expr : (int, CL.Location.t) Hashtbl.t = Hashtbl.create 10
+
+let loc_of_mod mod_expr =
+  let summary =
+    {
+      mod_summary_desc = mod_expr.CL.Typedtree.mod_desc;
+      mod_summary_loc = mod_expr.CL.Typedtree.mod_loc;
+    }
+  in
+  match Hashtbl.find convert_tbl (Mod_loc summary) with
+  | exception Not_found ->
+    let loc = !location in
+    incr location;
+    Hashtbl.add convert_tbl (Mod_loc summary) loc;
+    Hashtbl.add loc_to_expr loc mod_expr.mod_loc;
+    Converted_loc loc
+  | loc -> Converted_loc loc
+
 let expr_of_mod me = Expr (loc_of_mod me)
 let val_of_mod me = Var (Val (expr_of_mod me))
 let packet_of_mod me = Var (Packet (expr_of_mod me))
-let loc_of_expr expr = Expr_loc expr
+
+let loc_of_expr expr =
+  let summary =
+    {
+      exp_summary_desc = expr.CL.Typedtree.exp_desc;
+      exp_summary_loc = expr.CL.Typedtree.exp_loc;
+    }
+  in
+  match Hashtbl.find convert_tbl (Expr_loc summary) with
+  | exception Not_found ->
+    let loc = !location in
+    incr location;
+    Hashtbl.add convert_tbl (Expr_loc summary) loc;
+    Hashtbl.add loc_to_expr loc expr.exp_loc;
+    Converted_loc loc
+  | loc -> Converted_loc loc
+
 let expr_of_expr e = Expr (loc_of_expr e)
 let val_of_expr e = Var (Val (expr_of_expr e))
 let packet_of_expr e = Var (Packet (expr_of_expr e))
