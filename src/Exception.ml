@@ -83,7 +83,8 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
     structure |> process_structure
   | _ -> ()
 
-let print_time () =prerr_endline @@ "Time spent in variable propagation: "
+let print_time () =
+  prerr_endline @@ "Time spent in variable propagation: "
   ^ string_of_float !time_spent_in_var;
   prerr_endline @@ "Time spent in filter_pat: "
   ^ string_of_float !time_spent_in_filter;
