@@ -159,7 +159,12 @@ let value_prim = function
     if SESet.mem x !allocated then SESet.empty
     else (
       allocated := SESet.add x !allocated;
-      let i = new_memory () in
+      let i =
+        match x with
+        | Var (Val (Expr_var (_, context))) -> new_memory context
+        | Var (Val (Expr (Expr_loc x))) -> new_memory x.exp_context
+        | _ -> assert false
+      in
       update_loc i (SESet.singleton x);
       SESet.singleton (Ctor (None, Static [|i|])))
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
@@ -383,7 +388,7 @@ let resolve_var var set =
       let t = Unix.gettimeofday () in
       if !Common.Cli.debug_pat then (
         (match x with
-        | Val (Expr_var x) -> prerr_endline (CL.Ident.name x)
+        | Val (Expr_var (x, _)) -> prerr_endline (CL.Ident.name x)
         | _ -> ());
         update_g (Var var) (filter_pat_debug (Var x, p)))
       else update_g (Var var) (filter_pat (Var x, p));

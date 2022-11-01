@@ -1,27 +1,28 @@
 type expr_summary = {
   exp_type : CL.Types.type_expr;
   exp_loc : CL.Location.t;
+  exp_context : string;
 }
 
 type mod_summary = {
   mod_type : CL.Types.module_type;
   mod_loc : CL.Location.t;
+  mod_context : string;
 }
 
 type code_loc =
   | Expr_loc of expr_summary
   | Mod_loc of mod_summary
   | Bop_loc of CL.Types.value_description
-  | Converted_loc of int
 
-and param = CL.Ident.t option
+and param = (CL.Ident.t * string) option
 and arg = value se option list
 
 and _ expr =
-  | Expr_var : CL.Ident.t -> param expr
+  | Expr_var : (CL.Ident.t * string) -> param expr
   | Expr : code_loc -> code_loc expr
 
-and arr = Static of int array | Dynamic of int
+and arr = Static of loc array | Dynamic of loc
 
 and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
@@ -60,6 +61,7 @@ and arithop =
 and relop = GEN of rel
 and pattern
 and value
+and loc = int * string
 
 and _ se =
   | Top : _ se
@@ -75,32 +77,28 @@ and _ se =
   | Arith : arithop * value se list -> value se
   | Rel : relop * value se list -> value se
   | Diff : value se * pattern se -> value se
-  | Loc : int * pattern se option -> pattern se
+  | Loc : loc * pattern se option -> pattern se
 
 val current_module : string ref
-
-(* val address : int ref *)
-val new_memory : unit -> int
-val new_temp_var : unit -> param expr
+val new_memory : string -> loc
+val new_temp_var : string -> param expr
 
 module SESet : Set.S with type elt = value se
 
 val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
-val mem : (int, SESet.t) Hashtbl.t
+val mem : (loc, SESet.t) Hashtbl.t
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
 val var_to_se : var_se_tbl
 val update_var : CL.Ident.t -> SESet.elt list -> unit
 
-type to_be_resolved = (code_loc, CL.Path.t) Hashtbl.t
+type to_be_resolved = (code_loc, CL.Path.t * string) Hashtbl.t
 
 val to_be_resolved : to_be_resolved
 val update_to_be : code_loc -> CL.Path.t -> unit
-val convert_tbl : (code_loc, int) Hashtbl.t
-val loc_to_expr : (int, CL.Location.t) Hashtbl.t
 
 (* val list_rev_to_array : 'a list -> 'a -> 'a array *)
 (* val list_to_array : 'a list -> 'a -> 'a array *)
@@ -134,8 +132,8 @@ module GESet : Set.S with type elt = pattern se
 
 val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> unit
-val update_loc : int -> SESet.t -> unit
+val update_loc : loc -> SESet.t -> unit
 val grammar : (pattern se, GESet.t) Hashtbl.t
 val update_g : pattern se -> GESet.t -> unit
-val abs_mem : (int, GESet.t) Hashtbl.t
-val update_abs_loc : int -> GESet.t -> unit
+val abs_mem : (loc, GESet.t) Hashtbl.t
+val update_abs_loc : loc -> GESet.t -> unit

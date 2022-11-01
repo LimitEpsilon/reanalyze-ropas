@@ -4,31 +4,31 @@ open CL
 open SetExpression
 open Reduce
 
-let rec resolve_path (path : Path.t) =
+let rec resolve_path (path : Path.t) (context : string) =
   match path with
   | Pident x -> se_of_var x
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
-    let m_temp = Var (Val (new_temp_var ())) in
-    let m = resolve_path m in
+    let m_temp = Var (Val (new_temp_var context)) in
+    let m = resolve_path m context in
     update_sc m_temp m;
     [Fld (m_temp, (Some x, Some 0))]
   | ((Pdot (m, x)) [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
-    let m_temp = Var (Val (new_temp_var ())) in
-    let m = resolve_path m in
+    let m_temp = Var (Val (new_temp_var context)) in
+    let m = resolve_path m context in
     update_sc m_temp m;
     [Fld (m_temp, (Some x, Some 0))]
   | Papply (f, x) ->
-    let f_temp = Var (Val (new_temp_var ())) in
-    let x_temp = Var (Val (new_temp_var ())) in
-    let f = resolve_path f in
-    let x = resolve_path x in
+    let f_temp = Var (Val (new_temp_var context)) in
+    let x_temp = Var (Val (new_temp_var context)) in
+    let f = resolve_path f context in
+    let x = resolve_path x context in
     update_sc f_temp f;
     update_sc x_temp x;
     [App_V (f_temp, [Some x_temp])]
 
 let resolve_to_be_resolved () =
-  let resolve loc path =
-    try update_sc (Var (Val (Expr loc))) (resolve_path path)
+  let resolve loc (path, context) =
+    try update_sc (Var (Val (Expr loc))) (resolve_path path context)
     with _ ->
       if !Common.Cli.debug then (
         let loc =
@@ -36,7 +36,6 @@ let resolve_to_be_resolved () =
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
-          | Converted_loc l -> Hashtbl.find loc_to_expr l
         in
         prerr_string "Look at : ";
         Location.print_loc Format.str_formatter loc;

@@ -30,15 +30,15 @@ let string_of_relop : relop -> string = function
     | GT -> ">"
     | GE -> ">=")
 
-module Int = struct
-  type t = int
+module Loc = struct
+  type t = loc
 
   let compare = compare
 end
 
-module IntSet = Set.Make (Int)
+module LocSet = Set.Make (Loc)
 
-let to_be_explained = ref IntSet.empty
+let to_be_explained = ref LocSet.empty
 
 let print_code_loc loc =
   CL.Location.print_loc Format.str_formatter loc;
@@ -48,14 +48,13 @@ let print_loc = function
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
-  | Converted_loc l -> print_code_loc (Hashtbl.find loc_to_expr l)
 
 let print_param = function
   | None -> ()
-  | Some x -> prerr_string (CL.Ident.name x)
+  | Some (x, _) -> prerr_string (CL.Ident.name x)
 
 let print_expr : type k. k expr -> unit = function
-  | Expr_var p ->
+  | Expr_var (p, _) ->
     prerr_string "Expr_var (";
     prerr_string (CL.Ident.name p);
     prerr_string ")"
@@ -105,7 +104,7 @@ let rec print_se : value se -> unit = function
     prerr_string ", ";
     print_arr_with_separator arr ";";
     prerr_string ")"
-  | Ctor (k, Dynamic i) ->
+  | Ctor (k, Dynamic (i, _)) ->
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string "malloc ";
@@ -152,13 +151,13 @@ and print_pattern : pattern se -> unit = function
     prerr_string ", ";
     print_pattern_arr_with_separator arr ";";
     prerr_string ")"
-  | Loc (i, p) ->
+  | Loc ((i, name), p) ->
     prerr_string "(";
     prerr_int i;
     prerr_string ", ";
     (match p with
     | Some p -> print_pattern p
-    | _ -> to_be_explained := IntSet.add i !to_be_explained);
+    | _ -> to_be_explained := LocSet.add (i, name) !to_be_explained);
     prerr_string ")"
   | _ -> ()
 
@@ -231,7 +230,7 @@ and print_arr_with_separator arr sep =
   let i = ref 0 in
   prerr_string "[";
   while !i < len do
-    prerr_int arr.(!i);
+    prerr_int (fst arr.(!i));
     if !i < len - 1 then prerr_string sep;
     incr i
   done;
@@ -274,9 +273,9 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
       prerr_newline ())
     var_to_se
 
-let show_mem (mem : (int, SESet.t) Hashtbl.t) =
+let show_mem (mem : (loc, SESet.t) Hashtbl.t) =
   Hashtbl.iter
-    (fun key data ->
+    (fun (key, _) data ->
       if SESet.is_empty data then ()
       else (
         prerr_string "mem :\n";
@@ -314,9 +313,9 @@ let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
         prerr_newline ()))
     g
 
-let show_abs_mem (a : (int, GESet.t) Hashtbl.t) =
+let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
   Hashtbl.iter
-    (fun key data ->
+    (fun (key, _) data ->
       if GESet.is_empty data then ()
       else (
         prerr_string "abs_mem :\n";
@@ -372,16 +371,16 @@ let show_closure_analysis tbl =
 
 let explain_abs_mem () =
   prerr_endline "where abstract locations contain:";
-  IntSet.iter
-    (fun i ->
-      let set = try Hashtbl.find abs_mem i with _ -> GESet.empty in
+  LocSet.iter
+    (fun (i, name) ->
+      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
       prerr_string "\tlocation ";
       prerr_int i;
       prerr_newline ();
       show_pattern_with_separator set "\t\t";
       prerr_newline ())
     !to_be_explained;
-  to_be_explained := IntSet.empty
+  to_be_explained := LocSet.empty
 
 let print_sc_info () =
   show_mem mem;
