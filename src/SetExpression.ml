@@ -1,15 +1,7 @@
 [%%import "../config.h"]
 
-type expr_summary = {
-  exp_type : CL.Types.type_expr;
-  exp_loc : CL.Location.t;
-}
-
-type mod_summary = {
-  mod_type : CL.Types.module_type;
-  mod_loc : CL.Location.t;
-}
-
+type expr_summary = {exp_type : CL.Types.type_expr; exp_loc : CL.Location.t}
+type mod_summary = {mod_type : CL.Types.module_type; mod_loc : CL.Location.t}
 
 type code_loc =
   | Expr_loc of expr_summary
@@ -108,11 +100,14 @@ and _ se =
                   : if identifier look up in var_to_se to check if constant
                   : if constant check if zero, else mark might_raise *)
 
+let current_module = ref ""
 let temp_variable_label = ref 0
 
 let new_temp_var () =
   let temp = !temp_variable_label in
-  let temp_id = CL.Ident.create_persistent ("__temp" ^ string_of_int temp) in
+  let temp_id =
+    CL.Ident.create_persistent (!current_module ^ "__temp" ^ string_of_int temp)
+  in
   incr temp_variable_label;
   Expr_var temp_id
 
@@ -227,10 +222,7 @@ let packet_of_mod me = Var (Packet (expr_of_mod me))
 
 let loc_of_expr expr =
   let summary =
-    {
-      exp_type = expr.CL.Typedtree.exp_type;
-      exp_loc = expr.CL.Typedtree.exp_loc;
-    }
+    {exp_type = expr.CL.Typedtree.exp_type; exp_loc = expr.CL.Typedtree.exp_loc}
   in
   match Hashtbl.find convert_tbl (Expr_loc summary) with
   | exception Not_found ->

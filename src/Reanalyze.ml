@@ -155,6 +155,9 @@ let cli () =
       ( "-debug-pat",
         Unit (fun () -> Cli.debug_pat := true),
         "Debug pattern filtering" );
+      ( "-debug-time",
+        Unit (fun () -> Cli.debug_time := true),
+        "Print timing information for exception/closure analysis" );
       ( "-dce-cmt",
         String (fun s -> setDCE (Some s)),
         "root_path Experimental DCE for all the .cmt files under the root path"

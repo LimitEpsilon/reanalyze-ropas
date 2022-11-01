@@ -16,6 +16,7 @@ module Cli = struct
   let ci = ref false
   let closure = ref false
   let debug_pat = ref false
+  let debug_time = ref false
 
   (** The command was a -cmt variant (e.g. -exception-cmt) *)
   let cmtCommand = ref false

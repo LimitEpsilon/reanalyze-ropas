@@ -69,6 +69,7 @@ let process_structure (structure : Typedtree.structure) =
 
 let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   let id = Ident.create_persistent cmt_infos.cmt_modname in
+  let () = current_module := cmt_infos.cmt_modname in
   let filename =
     match cmt_infos.cmt_sourcefile with None -> "" | Some s -> s
   in
@@ -76,15 +77,28 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
-    current_file := (Hashtbl.create 10);
+    current_file := Hashtbl.create 10;
     update_var id v;
     update_exn_of_file filename p;
     structure |> process_structure
   | _ -> ()
 
+let print_time () =prerr_endline @@ "Time spent in variable propagation: "
+  ^ string_of_float !time_spent_in_var;
+  prerr_endline @@ "Time spent in filter_pat: "
+  ^ string_of_float !time_spent_in_filter;
+  prerr_endline @@ "Time spent in closure propagation: "
+  ^ string_of_float !time_spent_in_closure;
+  prerr_endline @@ "Time spent in constructor/record propagation: "
+  ^ string_of_float !time_spent_in_fld;
+  prerr_endline @@ "Time spent in update: "
+  ^ string_of_float !time_spent_in_update;
+  prerr_endline @@ "Time spent in constant propagation: "
+  ^ string_of_float !time_spent_in_const
+
 let reportResults ~ppf:_ =
   resolve_to_be_resolved ();
   solve ();
-  if !Common.Cli.closure then PrintSE.print_closure ()
-  else PrintSE.print_exa ();
+  if !Common.Cli.closure then PrintSE.print_closure () else PrintSE.print_exa ();
+  if !Common.Cli.debug_time then print_time () else ();
   if !Common.Cli.debug then PrintSE.print_grammar ()

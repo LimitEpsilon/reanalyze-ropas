@@ -77,6 +77,8 @@ and _ se =
   | Diff : value se * pattern se -> value se
   | Loc : int * pattern se option -> pattern se
 
+val current_module : string ref
+
 (* val address : int ref *)
 val new_memory : unit -> int
 val new_temp_var : unit -> param expr
