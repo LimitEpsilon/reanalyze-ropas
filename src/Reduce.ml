@@ -1,6 +1,8 @@
 open SetExpression
 open PrintSE
 
+let first = ref true
+
 let rec arg_len = function
   | [] -> 0
   | None :: tl -> arg_len tl
@@ -153,7 +155,7 @@ let value_prim = function
   | {CL.Primitive.prim_name = "%field1"}, [Some x] ->
     SESet.singleton (Fld (x, (None, Some 1)))
   | {CL.Primitive.prim_name = "%setfield0"}, [Some x; Some y] ->
-    update_c (Fld (x, (None, Some 0))) (SESet.singleton y);
+    update_c (Fld (x, (None, Some 0))) (SESet.singleton y) |> ignore;
     SESet.singleton (Ctor (Some "()", Static [||]))
   | {CL.Primitive.prim_name = "%makemutable"}, [Some x] ->
     if SESet.mem x !allocated then SESet.empty
@@ -165,7 +167,7 @@ let value_prim = function
         | Var (Val (Expr (Expr_loc x))) -> new_memory x.exp_context
         | _ -> assert false
       in
-      update_loc i (SESet.singleton x);
+      update_loc i (SESet.singleton x) |> ignore;
       SESet.singleton (Ctor (None, Static [|i|])))
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
     SESet.singleton (App_V (x, []))
@@ -194,21 +196,22 @@ let time_spent_in_update = ref 0.0
 let time_spent_in_const = ref 0.0
 
 let resolve_var var set =
-  let resolve = function
+  let resolve elt =
+    match elt with
     | Top ->
       let t = Unix.gettimeofday () in
-      update_g (Var var) (GESet.singleton Top);
+      update_g var (GESet.singleton Top) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Const c ->
+    | Const c when !first ->
       let t = Unix.gettimeofday () in
-      update_g (Var var) (GESet.singleton (Const c));
+      update_g var (GESet.singleton (Const c)) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Ctor (kappa, Static arr) ->
+    | Ctor (kappa, Static arr) when !first || SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
       let arr' = Array.map (fun i -> Loc (i, None)) arr in
-      update_g (Var var) (GESet.singleton (Ctor_pat (kappa, arr')));
+      update_g var (GESet.singleton (Ctor_pat (kappa, arr'))) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Var x ->
+    | Var x when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
       let set =
         SESet.filter
@@ -219,79 +222,88 @@ let resolve_var var set =
             | _ -> false)
           (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
       in
-      update_c (Var var) set;
+      update_c (Var var) set |> ignore;
       if Hashtbl.mem grammar (Var x) then
-        update_g (Var var) (Hashtbl.find grammar (Var x));
+        update_g var (Hashtbl.find grammar (Var x)) |> ignore;
       time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
-    | App_V (Prim p, l) ->
+    | App_V (Prim p, l) when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
-      if p.prim_arity = arg_len l then update_c (Var var) (value_prim (p, l));
+      if p.prim_arity = arg_len l then
+        update_c (Var var) (value_prim (p, l)) |> ignore;
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Prim p, l) ->
+    | App_P (Prim p, l) when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
-      if p.prim_arity = arg_len l then update_c (Var var) (packet_prim (p, l));
+      if p.prim_arity = arg_len l then
+        update_c (Var var) (packet_prim (p, l)) |> ignore;
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_V (Var x, []) ->
+    | App_V (Var x, [])
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Fn (None, l) ->
             let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
-            update_c (Var var) set
+            update_c (Var var) set |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Var x, []) ->
+    | App_P (Var x, [])
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Fn (None, l) ->
             let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
-            update_c (Var var) set
+            update_c (Var var) set |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_V (Var x, Some (Var y) :: tl) ->
+    | App_V (Var x, Some (Var y) :: tl)
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Prim p ->
             update_c (Var var)
               (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
+            |> ignore
           | Fn (Some x, l) ->
             let values =
               if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
               else SESet.of_list (List.map (fun e -> Var (Val e)) l)
             in
-            update_c (Var var) values;
+            update_c (Var var) values |> ignore;
             update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+            |> ignore
           | App_V (Prim p, l) when arg_len l < p.prim_arity ->
             let app =
               SESet.singleton
                 (App_V (Prim p, merge_args (l, Some (Var y) :: tl)))
             in
-            update_c (Var var) app
+            update_c (Var var) app |> ignore
           | App_V (f, None :: tl') ->
             let app =
               SESet.singleton (App_V (f, Some (Var y) :: merge_args (tl', tl)))
             in
-            update_c (Var var) app
+            update_c (Var var) app |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Var x, Some (Var y) :: tl) ->
+    | App_P (Var x, Some (Var y) :: tl)
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Prim p ->
             update_c (Var var)
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
+            |> ignore
           | Fn (Some x, l) ->
             let app_p =
               if tl <> [] then
@@ -299,19 +311,20 @@ let resolve_var var set =
               else SESet.empty
             in
             let body_p = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
-            update_c (Var var) (SESet.union app_p body_p);
+            update_c (Var var) (SESet.union app_p body_p) |> ignore;
             update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+            |> ignore
           | App_V (Prim p, l) when arg_len l < p.prim_arity ->
             let app =
               SESet.singleton
                 (App_P (Prim p, merge_args (l, Some (Var y) :: tl)))
             in
-            update_c (Var var) app
+            update_c (Var var) app |> ignore
           | App_V (f, None :: tl') ->
             let app =
               SESet.singleton (App_P (f, Some (Var y) :: merge_args (tl', tl)))
             in
-            update_c (Var var) app
+            update_c (Var var) app |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
@@ -320,7 +333,7 @@ let resolve_var var set =
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
-          | Top -> update_g (Var var) (GESet.singleton Top)
+          | Top -> update_g var (GESet.singleton Top) |> ignore
           | Ctor_pat (_, arr) ->
             let c_set =
               if i < Array.length arr then
@@ -345,8 +358,8 @@ let resolve_var var set =
                 | p -> GESet.singleton p
               else GESet.empty
             in
-            update_c (Var var) c_set;
-            update_g (Var var) g_set
+            update_c (Var var) c_set |> ignore;
+            update_g var g_set |> ignore
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
@@ -354,7 +367,7 @@ let resolve_var var set =
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
-          | Top -> update_g (Var var) (GESet.singleton Top)
+          | Top -> update_g var (GESet.singleton Top) |> ignore
           | Ctor_pat (Some k', arr) when k = k' ->
             let c_set =
               if i < Array.length arr then
@@ -379,19 +392,19 @@ let resolve_var var set =
                 | p -> GESet.singleton p
               else GESet.empty
             in
-            update_c (Var var) c_set;
-            update_g (Var var) g_set
+            update_c (Var var) c_set |> ignore;
+            update_g var g_set |> ignore
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
-    | Diff (Var x, p) ->
+    | Diff (Var x, p) when SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       if !Common.Cli.debug_pat then (
         (match x with
         | Val (Expr_var (x, _)) -> prerr_endline (CL.Ident.name x)
         | _ -> ());
-        update_g (Var var) (filter_pat_debug (Var x, p)))
-      else update_g (Var var) (filter_pat (Var x, p));
+        update_g var (filter_pat_debug (Var x, p)) |> ignore)
+      else update_g var (filter_pat (Var x, p)) |> ignore;
       time_spent_in_filter :=
         !time_spent_in_filter +. (Unix.gettimeofday () -. t)
     | _ -> ()
@@ -412,7 +425,7 @@ let back_propagate var set =
   back_propagated_vars := SESet.empty;
   auxiliary_back_propagate (Var var);
   SESet.iter
-    (function Var x -> update_g (Var x) set | _ -> ())
+    (function Var x -> update_g x set |> ignore | _ -> ())
     !back_propagated_vars
 
 let resolve_update (var, i) set =
@@ -429,9 +442,9 @@ let resolve_update (var, i) set =
               let temp_pat = Ctor_pat (k, temp) in
               if GESet.mem temp_pat p_set then ()
               else (
-                update_loc l set;
+                update_loc l set |> ignore;
                 back_propagate var (GESet.singleton temp_pat))
-            | Loc (l, None) -> update_loc l set
+            | Loc (l, None) -> update_loc l set |> ignore
             | _ -> ())
         | _ -> ())
       p_set
@@ -451,21 +464,22 @@ let step_sc () =
     sc
 
 let resolve_mem loc set =
-  let resolve = function
+  let resolve elt =
+    match elt with
     | Top ->
       let t = Unix.gettimeofday () in
-      update_abs_loc loc (GESet.singleton Top);
+      update_abs_loc loc (GESet.singleton Top) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Const c ->
+    | Const c when !first ->
       let t = Unix.gettimeofday () in
-      update_abs_loc loc (GESet.singleton (Const c));
+      update_abs_loc loc (GESet.singleton (Const c)) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Ctor (kappa, Static arr) ->
+    | Ctor (kappa, Static arr) when !first || SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
       let arr' = Array.map (fun i -> Loc (i, None)) arr in
-      update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, arr')));
+      update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, arr'))) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Var x ->
+    | Var x when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
       let set =
         SESet.filter
@@ -476,79 +490,88 @@ let resolve_mem loc set =
             | _ -> false)
           (try Hashtbl.find sc (Var x) with _ -> SESet.empty)
       in
-      update_loc loc set;
+      update_loc loc set |> ignore;
       if Hashtbl.mem grammar (Var x) then
-        update_abs_loc loc (Hashtbl.find grammar (Var x));
+        update_abs_loc loc (Hashtbl.find grammar (Var x)) |> ignore;
       time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
-    | App_V (Prim p, l) ->
+    | App_V (Prim p, l) when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
-      if p.prim_arity = arg_len l then update_loc loc (value_prim (p, l));
+      if p.prim_arity = arg_len l then
+        update_loc loc (value_prim (p, l)) |> ignore;
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Prim p, l) ->
+    | App_P (Prim p, l) when SESet.mem elt !prev_worklist ->
       let t = Unix.gettimeofday () in
-      if p.prim_arity = arg_len l then update_loc loc (packet_prim (p, l));
+      if p.prim_arity = arg_len l then
+        update_loc loc (packet_prim (p, l)) |> ignore;
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_V (Var x, []) ->
+    | App_V (Var x, [])
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Fn (None, l) ->
             let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
-            update_loc loc set
+            update_loc loc set |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Var x, []) ->
+    | App_P (Var x, [])
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Fn (None, l) ->
             let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
-            update_loc loc set
+            update_loc loc set |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_V (Var x, Some (Var y) :: tl) ->
+    | App_V (Var x, Some (Var y) :: tl)
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Prim p ->
             update_loc loc
               (SESet.singleton (App_V (Prim p, Some (Var y) :: tl)))
+            |> ignore
           | Fn (Some x, l) ->
             let values =
               if tl <> [] then
                 SESet.of_list (List.map (fun e -> App_V (Var (Val e), tl)) l)
               else SESet.of_list (List.map (fun e -> Var (Val e)) l)
             in
-            update_loc loc values;
+            update_loc loc values |> ignore;
             update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+            |> ignore
           | App_V (Prim p, l) when arg_len l < p.prim_arity ->
             let app =
               SESet.singleton
                 (App_V (Prim p, merge_args (l, Some (Var y) :: tl)))
             in
-            update_loc loc app
+            update_loc loc app |> ignore
           | App_V (f, None :: tl') ->
             let app =
               SESet.singleton (App_V (f, Some (Var y) :: merge_args (tl', tl)))
             in
-            update_loc loc app
+            update_loc loc app |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | App_P (Var x, Some (Var y) :: tl) ->
+    | App_P (Var x, Some (Var y) :: tl)
+      when SESet.mem elt !prev_worklist || SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
       SESet.iter
         (function
           | Prim p ->
             update_loc loc
               (SESet.singleton (App_P (Prim p, Some (Var y) :: tl)))
+            |> ignore
           | Fn (Some x, l) ->
             let app_p =
               if tl <> [] then
@@ -556,19 +579,20 @@ let resolve_mem loc set =
               else SESet.empty
             in
             let body_p = SESet.of_list (List.map (fun e -> Var (Packet e)) l) in
-            update_loc loc (SESet.union app_p body_p);
+            update_loc loc (SESet.union app_p body_p) |> ignore;
             update_c (Var (Val (Expr_var x))) (SESet.singleton (Var y))
+            |> ignore
           | App_V (Prim p, l) ->
             let app =
               SESet.singleton
                 (App_P (Prim p, merge_args (l, Some (Var y) :: tl)))
             in
-            update_loc loc app
+            update_loc loc app |> ignore
           | App_V (f, None :: tl') ->
             let app =
               SESet.singleton (App_P (f, Some (Var y) :: merge_args (tl', tl)))
             in
-            update_loc loc app
+            update_loc loc app |> ignore
           | _ -> ())
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
@@ -577,7 +601,7 @@ let resolve_mem loc set =
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
-          | Top -> update_abs_loc loc (GESet.singleton Top)
+          | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
           | Ctor_pat (_, arr) ->
             let c_set =
               if i < Array.length arr then
@@ -602,8 +626,8 @@ let resolve_mem loc set =
                 | p -> GESet.singleton p
               else GESet.empty
             in
-            update_loc loc c_set;
-            update_abs_loc loc g_set
+            update_loc loc c_set |> ignore;
+            update_abs_loc loc g_set |> ignore
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
@@ -611,7 +635,7 @@ let resolve_mem loc set =
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
-          | Top -> update_abs_loc loc (GESet.singleton Top)
+          | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
           | Ctor_pat (Some k', arr) when k = k' ->
             let c_set =
               if i < Array.length arr then
@@ -636,14 +660,14 @@ let resolve_mem loc set =
                 | p -> GESet.singleton p
               else GESet.empty
             in
-            update_loc loc c_set;
-            update_abs_loc loc g_set
+            update_loc loc c_set |> ignore;
+            update_abs_loc loc g_set |> ignore
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
-    | Diff (Var x, p) ->
+    | Diff (Var x, p) when SESet.mem (Var x) !prev_worklist ->
       let t = Unix.gettimeofday () in
-      update_abs_loc loc (filter_pat (Var x, p));
+      update_abs_loc loc (filter_pat (Var x, p)) |> ignore;
       time_spent_in_filter :=
         !time_spent_in_filter +. (Unix.gettimeofday () -. t)
     | _ -> ()
@@ -652,12 +676,19 @@ let resolve_mem loc set =
 
 let step_mem () = Hashtbl.iter resolve_mem mem
 
-let solve () =
+let prepare_step () =
   changed := false;
+  prev_worklist := !worklist;
+  worklist := SESet.empty
+
+let solve () =
+  Format.flush_str_formatter () |> ignore;
+  prepare_step ();
   step_sc ();
   step_mem ();
+  first := false;
   while !changed do
-    changed := false;
+    prepare_step ();
     step_sc ();
     step_mem ()
   done

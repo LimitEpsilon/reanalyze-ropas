@@ -85,6 +85,7 @@ val new_temp_var : string -> param expr
 
 module SESet : Set.S with type elt = value se
 
+val worklist : SESet.t ref
 val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
@@ -126,14 +127,15 @@ val se_of_expr : CL.Typedtree.expression -> value se list * value se list
 
 (* for resolution *)
 val changed : bool ref
+val prev_worklist : SESet.t ref
 val exn_of_file : (string, value se list) Hashtbl.t
 
 module GESet : Set.S with type elt = pattern se
 
 val update_exn_of_file : string -> value se list -> unit
-val update_c : value se -> SESet.t -> unit
-val update_loc : loc -> SESet.t -> unit
+val update_c : value se -> SESet.t -> bool
+val update_loc : loc -> SESet.t -> bool
 val grammar : (pattern se, GESet.t) Hashtbl.t
-val update_g : pattern se -> GESet.t -> unit
+val update_g : 'a tagged_expr -> GESet.t -> bool
 val abs_mem : (loc, GESet.t) Hashtbl.t
-val update_abs_loc : loc -> GESet.t -> unit
+val update_abs_loc : loc -> GESet.t -> bool

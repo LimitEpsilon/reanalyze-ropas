@@ -155,16 +155,20 @@ end
 
 module SESet = Set.Make (SE)
 
+let worklist = ref SESet.empty
 let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_sc key data =
   let set = SESet.of_list data in
+  worklist := SESet.union set !worklist;
   if Hashtbl.mem sc key then (
     let original = Hashtbl.find sc key in
     Hashtbl.remove sc key;
     Hashtbl.add sc key (SESet.union original set))
-  else Hashtbl.add sc key set
+  else (
+    Hashtbl.add sc key set;
+    worklist := SESet.add key !worklist)
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
@@ -800,6 +804,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 
 (* for resolution *)
 let changed = ref false
+let prev_worklist = ref SESet.empty
 let exn_of_file = Hashtbl.create 10
 
 module GE = struct
@@ -816,67 +821,85 @@ let update_exn_of_file (key : string) (data : value se list) =
 let update_c key set =
   if Hashtbl.mem sc key then
     let original = Hashtbl.find sc key in
-    if SESet.mem Top original then ()
+    if SESet.mem Top original then false
     else
       let diff = SESet.diff set original in
-      if SESet.is_empty diff then ()
+      if SESet.is_empty diff then false
       else (
         Hashtbl.remove sc key;
         if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
         else Hashtbl.add sc key (SESet.union original diff);
-        changed := true)
+        worklist := SESet.union diff !worklist;
+        worklist := SESet.add key !worklist;
+        changed := true;
+        true)
   else (
     Hashtbl.add sc key set;
-    changed := true)
+    SESet.iter (fun x -> worklist := SESet.add x !worklist) set;
+    worklist := SESet.union set !worklist;
+    worklist := SESet.add key !worklist;
+    changed := true;
+    true)
 
 let update_loc key set =
   if Hashtbl.mem mem key then
     let original = Hashtbl.find mem key in
-    if SESet.mem Top original then ()
+    if SESet.mem Top original then false
     else
       let diff = SESet.diff set original in
-      if SESet.is_empty diff then ()
+      if SESet.is_empty diff then false
       else (
         Hashtbl.remove mem key;
         if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
         else Hashtbl.add mem key (SESet.union original diff);
-        changed := true)
+        worklist := SESet.union diff !worklist;
+        changed := true;
+        true)
   else (
     Hashtbl.add mem key set;
-    changed := true)
+    worklist := SESet.union set !worklist;
+    changed := true;
+    true)
 
 let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
 
-let update_g key set =
+let update_g var set =
+  let key = Var var in
   if Hashtbl.mem grammar key then
     let original = Hashtbl.find grammar key in
-    if GESet.mem Top original then ()
+    if GESet.mem Top original then false
     else
       let diff = GESet.diff set original in
-      if GESet.is_empty diff then ()
+      if GESet.is_empty diff then false
       else (
         Hashtbl.remove grammar key;
         if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
         else Hashtbl.add grammar key (GESet.union original diff);
-        changed := true)
+        worklist := SESet.add (Var var) !worklist;
+        changed := true;
+        true)
   else (
     Hashtbl.add grammar key set;
-    changed := true)
+    worklist := SESet.add (Var var) !worklist;
+    changed := true;
+    true)
 
 let abs_mem : (loc, GESet.t) Hashtbl.t = Hashtbl.create 256
 
 let update_abs_loc key set =
   if Hashtbl.mem abs_mem key then
     let original = Hashtbl.find abs_mem key in
-    if GESet.mem Top original then ()
+    if GESet.mem Top original then false
     else
       let diff = GESet.diff set original in
-      if GESet.is_empty diff then ()
+      if GESet.is_empty diff then false
       else (
         Hashtbl.remove abs_mem key;
         if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
         else Hashtbl.add abs_mem key (GESet.union original diff);
-        changed := true)
+        changed := true;
+        true)
   else (
     Hashtbl.add abs_mem key set;
-    changed := true)
+    changed := true;
+    true)
