@@ -154,21 +154,33 @@ module SE = struct
 end
 
 module SESet = Set.Make (SE)
+module Worklist = Set.Make (Int)
 
-let worklist = ref SESet.empty
+let worklist = ref Worklist.empty
 let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
+let hash = Hashtbl.hash
+
+let update_worklist set =
+  let summarize = function
+    | App_V (x, _) | App_P (x, _) -> worklist := Worklist.add (hash x) !worklist
+    | Var x -> worklist := Worklist.add (hash (Var x)) !worklist
+    | Ctor (kappa, arr) ->
+      worklist := Worklist.add (hash (Ctor (kappa, arr))) !worklist
+    | _ -> ()
+  in
+  SESet.iter summarize set
 
 let update_sc key data =
   let set = SESet.of_list data in
-  worklist := SESet.union set !worklist;
+  update_worklist set;
   if Hashtbl.mem sc key then (
     let original = Hashtbl.find sc key in
     Hashtbl.remove sc key;
     Hashtbl.add sc key (SESet.union original set))
   else (
     Hashtbl.add sc key set;
-    worklist := SESet.add key !worklist)
+    update_worklist (SESet.singleton key))
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
@@ -804,7 +816,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 
 (* for resolution *)
 let changed = ref false
-let prev_worklist = ref SESet.empty
+let prev_worklist = ref Worklist.empty
 let exn_of_file = Hashtbl.create 10
 
 module GE = struct
@@ -829,15 +841,12 @@ let update_c key set =
         Hashtbl.remove sc key;
         if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
         else Hashtbl.add sc key (SESet.union original diff);
-        worklist := SESet.union diff !worklist;
-        worklist := SESet.add key !worklist;
+        update_worklist (SESet.add key diff);
         changed := true;
         true)
   else (
     Hashtbl.add sc key set;
-    SESet.iter (fun x -> worklist := SESet.add x !worklist) set;
-    worklist := SESet.union set !worklist;
-    worklist := SESet.add key !worklist;
+    update_worklist (SESet.add key set);
     changed := true;
     true)
 
@@ -852,12 +861,12 @@ let update_loc key set =
         Hashtbl.remove mem key;
         if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
         else Hashtbl.add mem key (SESet.union original diff);
-        worklist := SESet.union diff !worklist;
+        update_worklist diff;
         changed := true;
         true)
   else (
     Hashtbl.add mem key set;
-    worklist := SESet.union set !worklist;
+    update_worklist set;
     changed := true;
     true)
 
@@ -875,12 +884,12 @@ let update_g var set =
         Hashtbl.remove grammar key;
         if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
         else Hashtbl.add grammar key (GESet.union original diff);
-        worklist := SESet.add (Var var) !worklist;
+        update_worklist (SESet.singleton (Var var));
         changed := true;
         true)
   else (
     Hashtbl.add grammar key set;
-    worklist := SESet.add (Var var) !worklist;
+    update_worklist (SESet.singleton (Var var));
     changed := true;
     true)
 
