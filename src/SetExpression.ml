@@ -157,6 +157,7 @@ module SESet = Set.Make (SE)
 module Worklist = Set.Make (Int)
 
 let worklist = ref Worklist.empty
+let reverse_mem : (loc, Worklist.t) Hashtbl.t = Hashtbl.create 10
 let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
 let hash = Hashtbl.hash
@@ -827,6 +828,24 @@ end
 
 module GESet = Set.Make (GE)
 
+let update_worklist_g key set =
+  let update_l = function
+    | Loc (l, None) -> (
+      match Hashtbl.find reverse_mem l with
+      | exception Not_found ->
+        Hashtbl.add reverse_mem l (Worklist.singleton (hash key))
+      | original ->
+        Hashtbl.remove reverse_mem l;
+        Hashtbl.add reverse_mem l (Worklist.add (hash key) original))
+    | _ -> ()
+  in
+  let summarize = function
+    | Ctor_pat (_, arr) -> Array.iter update_l arr
+    | _ -> ()
+  in
+  GESet.iter summarize set;
+  worklist := Worklist.add (hash key) !worklist
+
 let update_exn_of_file (key : string) (data : value se list) =
   Hashtbl.add exn_of_file key data
 
@@ -862,11 +881,19 @@ let update_loc key set =
         if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
         else Hashtbl.add mem key (SESet.union original diff);
         update_worklist diff;
+        worklist :=
+          Worklist.union
+            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
+            !worklist;
         changed := true;
         true)
   else (
     Hashtbl.add mem key set;
     update_worklist set;
+    worklist :=
+      Worklist.union
+        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
+        !worklist;
     changed := true;
     true)
 
@@ -884,12 +911,12 @@ let update_g var set =
         Hashtbl.remove grammar key;
         if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
         else Hashtbl.add grammar key (GESet.union original diff);
-        update_worklist (SESet.singleton (Var var));
+        update_worklist_g key diff;
         changed := true;
         true)
   else (
     Hashtbl.add grammar key set;
-    update_worklist (SESet.singleton (Var var));
+    update_worklist_g key set;
     changed := true;
     true)
 
@@ -906,9 +933,17 @@ let update_abs_loc key set =
         Hashtbl.remove abs_mem key;
         if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
         else Hashtbl.add abs_mem key (GESet.union original diff);
+        worklist :=
+          Worklist.union
+            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
+            !worklist;
         changed := true;
         true)
   else (
     Hashtbl.add abs_mem key set;
+    worklist :=
+      Worklist.union
+        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
+        !worklist;
     changed := true;
     true)

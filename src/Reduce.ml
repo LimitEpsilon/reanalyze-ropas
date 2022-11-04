@@ -325,7 +325,7 @@ let resolve_var var set =
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | Fld (Var x, (None, Some i)) ->
+    | Fld (Var x, (None, Some i)) when Worklist.mem (hash (Var x)) !prev_worklist ->
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
@@ -359,7 +359,7 @@ let resolve_var var set =
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
-    | Fld (Var x, (Some k, Some i)) ->
+    | Fld (Var x, (Some k, Some i)) when Worklist.mem (hash (Var x)) !prev_worklist ->
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
@@ -589,7 +589,7 @@ let resolve_mem loc set =
         (try Hashtbl.find sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
-    | Fld (Var x, (None, Some i)) ->
+    | Fld (Var x, (None, Some i)) when Worklist.mem (hash (Var x)) !prev_worklist ->
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
@@ -623,7 +623,7 @@ let resolve_mem loc set =
           | _ -> ())
         (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
-    | Fld (Var x, (Some k, Some i)) ->
+    | Fld (Var x, (Some k, Some i)) when Worklist.mem (hash (Var x)) !prev_worklist ->
       let t = Unix.gettimeofday () in
       GESet.iter
         (function
