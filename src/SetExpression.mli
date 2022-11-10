@@ -85,9 +85,16 @@ val new_temp_var : string -> param expr
 val hash : 'a -> int
 
 module SESet : Set.S with type elt = value se
-module Worklist : Set.S with type elt = int
 
-val worklist : Worklist.t ref
+module Worklist : sig
+  type t = (int, unit) Hashtbl.t
+
+  val add : int -> t -> unit
+  val mem : int -> t -> bool
+  val prepare_step : t -> t -> unit
+end
+
+val worklist : Worklist.t
 val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
@@ -129,7 +136,7 @@ val se_of_expr : CL.Typedtree.expression -> value se list * value se list
 
 (* for resolution *)
 val changed : bool ref
-val prev_worklist : Worklist.t ref
+val prev_worklist : Worklist.t
 val exn_of_file : (string, value se list) Hashtbl.t
 
 module GESet : Set.S with type elt = pattern se

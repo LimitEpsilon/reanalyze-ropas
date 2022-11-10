@@ -154,9 +154,22 @@ module SE = struct
 end
 
 module SESet = Set.Make (SE)
-module Worklist = Set.Make (Int)
 
-let worklist = ref Worklist.empty
+module Worklist = struct
+  type t = (int, unit) Hashtbl.t
+
+  let add x (worklist : t) =
+    if Hashtbl.mem worklist x then () else Hashtbl.add worklist x ()
+
+  let mem x (worklist : t) = Hashtbl.mem worklist x
+
+  let prepare_step (worklist : t) (prev_worklist : t) =
+    Hashtbl.reset prev_worklist;
+    Hashtbl.iter (fun x () -> Hashtbl.add prev_worklist x ()) worklist;
+    Hashtbl.reset worklist
+end
+
+let worklist : Worklist.t = Hashtbl.create 10
 let reverse_mem : (loc, Worklist.t) Hashtbl.t = Hashtbl.create 10
 let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
 let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
@@ -164,10 +177,9 @@ let hash = Hashtbl.hash
 
 let update_worklist set =
   let summarize = function
-    | App_V (x, _) | App_P (x, _) -> worklist := Worklist.add (hash x) !worklist
-    | Var x -> worklist := Worklist.add (hash (Var x)) !worklist
-    | Ctor (kappa, arr) ->
-      worklist := Worklist.add (hash (Ctor (kappa, arr))) !worklist
+    | App_V (x, _) | App_P (x, _) -> Worklist.add (hash x) worklist
+    | Var x -> Worklist.add (hash (Var x)) worklist
+    | Ctor (kappa, arr) -> Worklist.add (hash (Ctor (kappa, arr))) worklist
     | _ -> ()
   in
   SESet.iter summarize set
@@ -817,7 +829,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 
 (* for resolution *)
 let changed = ref false
-let prev_worklist = ref Worklist.empty
+let prev_worklist = Hashtbl.create 10
 let exn_of_file = Hashtbl.create 10
 
 module GE = struct
@@ -833,10 +845,10 @@ let update_worklist_g key set =
     | Loc (l, None) -> (
       match Hashtbl.find reverse_mem l with
       | exception Not_found ->
-        Hashtbl.add reverse_mem l (Worklist.singleton (hash key))
-      | original ->
-        Hashtbl.remove reverse_mem l;
-        Hashtbl.add reverse_mem l (Worklist.add (hash key) original))
+        let new_tbl = Hashtbl.create 1 in
+        Hashtbl.add new_tbl (hash key) ();
+        Hashtbl.add reverse_mem l new_tbl
+      | original -> Worklist.add (hash key) original)
     | _ -> ()
   in
   let summarize = function
@@ -844,7 +856,7 @@ let update_worklist_g key set =
     | _ -> ()
   in
   GESet.iter summarize set;
-  worklist := Worklist.add (hash key) !worklist
+  Worklist.add (hash key) worklist
 
 let update_exn_of_file (key : string) (data : value se list) =
   Hashtbl.add exn_of_file key data
@@ -869,6 +881,11 @@ let update_c key set =
     changed := true;
     true)
 
+let consult_reverse_mem key =
+  match Hashtbl.find reverse_mem key with
+  | exception Not_found -> ()
+  | affected -> Hashtbl.iter (fun x () -> Worklist.add x worklist) affected
+
 let update_loc key set =
   if Hashtbl.mem mem key then
     let original = Hashtbl.find mem key in
@@ -881,19 +898,13 @@ let update_loc key set =
         if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
         else Hashtbl.add mem key (SESet.union original diff);
         update_worklist diff;
-        worklist :=
-          Worklist.union
-            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-            !worklist;
+        consult_reverse_mem key;
         changed := true;
         true)
   else (
     Hashtbl.add mem key set;
     update_worklist set;
-    worklist :=
-      Worklist.union
-        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-        !worklist;
+    consult_reverse_mem key;
     changed := true;
     true)
 
@@ -933,17 +944,11 @@ let update_abs_loc key set =
         Hashtbl.remove abs_mem key;
         if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
         else Hashtbl.add abs_mem key (GESet.union original diff);
-        worklist :=
-          Worklist.union
-            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-            !worklist;
+        consult_reverse_mem key;
         changed := true;
         true)
   else (
     Hashtbl.add abs_mem key set;
-    worklist :=
-      Worklist.union
-        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-        !worklist;
+    consult_reverse_mem key;
     changed := true;
     true)
