@@ -153,7 +153,60 @@ module SE = struct
   let compare = compare
 end
 
-module SESet = Set.Make (SE)
+module SESet = struct
+  type t = (SE.t, unit) Hashtbl.t
+  exception Not_empty
+
+  let mem x (set : t) = Hashtbl.mem set x
+
+  let add x (set : t) =
+    if mem x set then () else Hashtbl.add set x ()
+
+  let diff (s1 : t) (s2 : t) =
+    let new_set = Hashtbl.create 4 in
+    let add_diff elt () =
+      if mem elt s2 then () else add elt new_set in
+    Hashtbl.iter add_diff s1;
+    new_set
+
+  let union (s1 : t) (s2 : t) =
+    Hashtbl.iter (fun x () -> add x s1) s2;
+    s1
+
+  let empty () : t = Hashtbl.create 1
+
+  let is_empty (set : t) =
+    let update _ _ = raise Not_empty in
+    match Hashtbl.iter update set with
+    | () -> true
+    | exception Not_empty -> false
+
+  let iter f (set : t) =
+    Hashtbl.iter (fun x () -> f x) set
+
+  let of_list (l : SE.t list) =
+    let new_set = Hashtbl.create 4 in
+    let update x = add x new_set in
+    List.iter update l;
+    new_set
+
+  let singleton x =
+    let new_set = Hashtbl.create 1 in
+    add x new_set;
+    new_set
+
+  let elements (set : t) =
+    let ret = ref [] in
+    let update x = ret := x :: !ret in
+    iter update set;
+    !ret
+
+  let filter f (set : t) =
+    let new_set = Hashtbl.create 4 in
+    let update x = if f x then add x new_set in
+    iter update set;
+    new_set
+end
 
 module Worklist = struct
   type t = (int, unit) Hashtbl.t
@@ -869,15 +922,16 @@ let update_c key set =
       let diff = SESet.diff set original in
       if SESet.is_empty diff then false
       else (
-        Hashtbl.remove sc key;
-        if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
-        else Hashtbl.add sc key (SESet.union original diff);
-        update_worklist (SESet.add key diff);
+        if SESet.mem Top diff then (Hashtbl.reset original; SESet.add Top original)
+        else SESet.union original diff |> ignore;
+        update_worklist diff;
+        Worklist.add (hash key) worklist;
         changed := true;
         true)
   else (
     Hashtbl.add sc key set;
-    update_worklist (SESet.add key set);
+    update_worklist set;
+    Worklist.add (hash key) worklist;
     changed := true;
     true)
 

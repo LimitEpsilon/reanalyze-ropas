@@ -84,7 +84,33 @@ val new_memory : string -> loc
 val new_temp_var : string -> param expr
 val hash : 'a -> int
 
-module SESet : Set.S with type elt = value se
+module SESet : sig
+  type t = (value se, unit) Hashtbl.t
+  exception Not_empty
+
+  val mem : value se -> t -> bool
+
+  val add : value se -> t -> unit
+
+  val diff : t -> t -> t
+
+  val union : t -> t -> t
+
+  val empty : unit -> t
+
+  val is_empty : t -> bool
+
+  val iter : (value se -> unit) -> t -> unit
+
+  val of_list : value se list -> t
+
+  val singleton : value se -> t
+
+  val elements : t -> value se list
+
+  val filter : (value se -> bool) -> t -> t
+end
+
 
 module Worklist : sig
   type t = (int, unit) Hashtbl.t
@@ -97,13 +123,13 @@ end
 val worklist : Worklist.t
 val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
-val update_sc : value se -> SESet.elt list -> unit
+val update_sc : value se -> value se list -> unit
 val mem : (loc, SESet.t) Hashtbl.t
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
 val var_to_se : var_se_tbl
-val update_var : CL.Ident.t -> SESet.elt list -> unit
+val update_var : CL.Ident.t -> value se list -> unit
 
 type to_be_resolved = (code_loc, CL.Path.t * string) Hashtbl.t
 
