@@ -20,7 +20,7 @@ and arg = value se option list
 
 and _ expr =
   | Expr_var : (CL.Ident.t * string) -> param expr
-  | Expr : code_loc -> code_loc expr
+  | Expr : loc -> loc expr
 
 and arr = Static of loc array | Dynamic of loc
 
@@ -67,7 +67,7 @@ and _ se =
   | Top : _ se
   | Const : CL.Asttypes.constant -> _ se
   | Prim : CL.Primitive.description -> value se
-  | Fn : param * code_loc expr list -> value se
+  | Fn : param * loc expr list -> value se
   | Var : _ tagged_expr -> _ se
   | App_V : value se * arg -> value se
   | App_P : value se * arg -> value se
@@ -84,33 +84,7 @@ val new_memory : string -> loc
 val new_temp_var : string -> param expr
 val hash : 'a -> int
 
-module SESet : sig
-  type t = (value se, unit) Hashtbl.t
-  exception Not_empty
-
-  val mem : value se -> t -> bool
-
-  val add : value se -> t -> unit
-
-  val diff : t -> t -> t
-
-  val union : t -> t -> t
-
-  val empty : unit -> t
-
-  val is_empty : t -> bool
-
-  val iter : (value se -> unit) -> t -> unit
-
-  val of_list : value se list -> t
-
-  val singleton : value se -> t
-
-  val elements : t -> value se list
-
-  val filter : (value se -> bool) -> t -> t
-end
-
+module SESet : Set.S with type elt = value se
 
 module Worklist : sig
   type t = (int, unit) Hashtbl.t
@@ -123,19 +97,20 @@ end
 val worklist : Worklist.t
 val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
 val sc : (value se, SESet.t) Hashtbl.t
-val update_sc : value se -> value se list -> unit
+val update_sc : value se -> SESet.elt list -> unit
 val mem : (loc, SESet.t) Hashtbl.t
 
 type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
 
 val var_to_se : var_se_tbl
-val update_var : CL.Ident.t -> value se list -> unit
+val update_var : CL.Ident.t -> SESet.elt list -> unit
 
-type to_be_resolved = (code_loc, CL.Path.t * string) Hashtbl.t
+type to_be_resolved = (loc, CL.Path.t * string) Hashtbl.t
 
 val to_be_resolved : to_be_resolved
-val update_to_be : code_loc -> CL.Path.t -> unit
+val update_to_be : loc -> CL.Path.t -> unit
 
+val label_to_summary : (loc, code_loc) Hashtbl.t
 (* val list_rev_to_array : 'a list -> 'a -> 'a array *)
 (* val list_to_array : 'a list -> 'a -> 'a array *)
 val val_of_expr : CL.Typedtree.expression -> value se

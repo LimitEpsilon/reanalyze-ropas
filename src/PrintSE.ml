@@ -44,7 +44,8 @@ let print_code_loc loc =
   CL.Location.print_loc Format.str_formatter loc;
   prerr_string (Format.flush_str_formatter ())
 
-let print_loc = function
+let print_loc loc =
+  match Hashtbl.find label_to_summary loc with
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
@@ -399,4 +400,3 @@ let print_exa () =
 let print_closure () =
   Format.flush_str_formatter () |> ignore;
   show_closure_analysis sc
-

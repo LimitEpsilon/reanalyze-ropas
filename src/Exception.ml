@@ -32,7 +32,7 @@ let resolve_to_be_resolved () =
     with _ ->
       if !Common.Cli.debug then (
         let loc =
-          match loc with
+          match Hashtbl.find label_to_summary loc with
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
