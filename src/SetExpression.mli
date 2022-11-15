@@ -87,7 +87,7 @@ val hash : 'a -> int
 module SESet : Set.S with type elt = value se
 
 module Worklist : sig
-  type t = (int, unit) Hashtbl.t
+  type t = (int, unit) Efficient_hashtbl.t
 
   val add : int -> t -> unit
   val mem : int -> t -> bool
@@ -95,29 +95,30 @@ module Worklist : sig
 end
 
 val worklist : Worklist.t
-val current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref
-val sc : (value se, SESet.t) Hashtbl.t
+val current_file : (CL.Ident.t, SESet.t) Efficient_hashtbl.t ref
+val sc : (value se, SESet.t) Efficient_hashtbl.t
 val update_sc : value se -> SESet.elt list -> unit
-val mem : (loc, SESet.t) Hashtbl.t
+val memory : (loc, SESet.t) Efficient_hashtbl.t
 
-type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
+type var_se_tbl =
+  (string, (CL.Ident.t, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
 
 val var_to_se : var_se_tbl
 val update_var : CL.Ident.t -> SESet.elt list -> unit
 
-type to_be_resolved = (loc, CL.Path.t * string) Hashtbl.t
+type to_be_resolved = (loc, CL.Path.t * string) Efficient_hashtbl.t
 
 val to_be_resolved : to_be_resolved
 val update_to_be : loc -> CL.Path.t -> unit
+val label_to_summary : (loc, code_loc) Efficient_hashtbl.t
 
-val label_to_summary : (loc, code_loc) Hashtbl.t
 (* val list_rev_to_array : 'a list -> 'a -> 'a array *)
 (* val list_to_array : 'a list -> 'a -> 'a array *)
 val val_of_expr : CL.Typedtree.expression -> value se
 val packet_of_expr : CL.Typedtree.expression -> value se
 val val_of_mod : CL.Typedtree.module_expr -> value se
 val packet_of_mod : CL.Typedtree.module_expr -> value se
-val se_of_var : CL.Ident.t -> value se list
+val se_of_var : CL.Ident.t -> string -> value se list
 val se_of_mb : CL.Typedtree.module_binding -> value se list * value se list
 val se_of_vb : CL.Typedtree.value_binding -> value se list * value se list
 
@@ -138,14 +139,14 @@ val se_of_expr : CL.Typedtree.expression -> value se list * value se list
 (* for resolution *)
 val changed : bool ref
 val prev_worklist : Worklist.t
-val exn_of_file : (string, value se list) Hashtbl.t
+val exn_of_file : (string, value se list) Efficient_hashtbl.t
 
 module GESet : Set.S with type elt = pattern se
 
 val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> bool
 val update_loc : loc -> SESet.t -> bool
-val grammar : (pattern se, GESet.t) Hashtbl.t
+val grammar : (pattern se, GESet.t) Efficient_hashtbl.t
 val update_g : 'a tagged_expr -> GESet.t -> bool
-val abs_mem : (loc, GESet.t) Hashtbl.t
+val abs_mem : (loc, GESet.t) Efficient_hashtbl.t
 val update_abs_loc : loc -> GESet.t -> bool

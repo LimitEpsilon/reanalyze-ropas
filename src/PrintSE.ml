@@ -45,7 +45,7 @@ let print_code_loc loc =
   prerr_string (Format.flush_str_formatter ())
 
 let print_loc loc =
-  match Hashtbl.find label_to_summary loc with
+  match Efficient_hashtbl.find label_to_summary loc with
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
@@ -238,7 +238,7 @@ and print_arr_with_separator arr sep =
   prerr_string "]"
 
 (* let show_env_map (env_map : globalenv) = *)
-(*   Hashtbl.iter *)
+(*   Efficient_hashtbl.iter *)
 (*     (fun param loc_tagged_expr -> *)
 (*       prerr_string "Globalenv :\n param = "; *)
 (*       print_param param; *)
@@ -264,18 +264,21 @@ let show_pattern_with_separator set sep =
     set
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
-  Hashtbl.iter
-    (fun x se ->
-      prerr_string "var_to_se :\n ident = ";
-      prerr_string (CL.Ident.unique_name x);
-      prerr_string "\n se = ";
-      prerr_newline ();
-      show_se_with_separator se "\t";
-      prerr_newline ())
+  Efficient_hashtbl.iter
+    (fun _ tbl ->
+      Efficient_hashtbl.iter
+        (fun x se ->
+          prerr_string "var_to_se :\n ident = ";
+          prerr_string (CL.Ident.unique_name x);
+          prerr_string "\n se = ";
+          prerr_newline ();
+          show_se_with_separator se "\t";
+          prerr_newline ())
+        tbl)
     var_to_se
 
-let show_mem (mem : (loc, SESet.t) Hashtbl.t) =
-  Hashtbl.iter
+let show_mem (mem : (loc, SESet.t) Efficient_hashtbl.t) =
+  Efficient_hashtbl.iter
     (fun (key, _) data ->
       if SESet.is_empty data then ()
       else (
@@ -286,8 +289,8 @@ let show_mem (mem : (loc, SESet.t) Hashtbl.t) =
         prerr_newline ()))
     mem
 
-let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
-  Hashtbl.iter
+let show_sc_tbl (tbl : (value se, SESet.t) Efficient_hashtbl.t) =
+  Efficient_hashtbl.iter
     (fun key data ->
       if SESet.is_empty data then ()
       else (
@@ -301,8 +304,8 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
         prerr_newline ()))
     tbl
 
-let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
-  Hashtbl.iter
+let show_grammar (g : (pattern se, GESet.t) Efficient_hashtbl.t) =
+  Efficient_hashtbl.iter
     (fun key data ->
       if GESet.is_empty data then ()
       else (
@@ -314,8 +317,8 @@ let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
         prerr_newline ()))
     g
 
-let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
-  Hashtbl.iter
+let show_abs_mem (a : (loc, GESet.t) Efficient_hashtbl.t) =
+  Efficient_hashtbl.iter
     (fun (key, _) data ->
       if GESet.is_empty data then ()
       else (
@@ -327,8 +330,8 @@ let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
         prerr_newline ()))
     a
 
-let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
-  Hashtbl.iter
+let show_exn_of_file (tbl : (string, value se list) Efficient_hashtbl.t) =
+  Efficient_hashtbl.iter
     (fun key data ->
       prerr_string "exceptions in file ";
       prerr_string key;
@@ -337,7 +340,7 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
         (function
           | Var x ->
             let set =
-              try Hashtbl.find grammar (Var x) with _ -> GESet.empty
+              try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty
             in
             if GESet.is_empty set then ()
             else (
@@ -352,7 +355,7 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
 
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
-  Hashtbl.iter
+  Efficient_hashtbl.iter
     (fun key data ->
       let set =
         SESet.filter
@@ -374,7 +377,9 @@ let explain_abs_mem () =
   prerr_endline "where abstract locations contain:";
   LocSet.iter
     (fun (i, name) ->
-      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
+      let set =
+        try Efficient_hashtbl.find abs_mem (i, name) with _ -> GESet.empty
+      in
       prerr_string "\tlocation ";
       prerr_int i;
       prerr_newline ();
@@ -384,7 +389,7 @@ let explain_abs_mem () =
   to_be_explained := LocSet.empty
 
 let print_sc_info () =
-  show_mem mem;
+  show_mem memory;
   show_var_se_tbl var_to_se;
   show_sc_tbl sc
 

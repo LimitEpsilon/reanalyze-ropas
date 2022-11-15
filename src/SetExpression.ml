@@ -1,5 +1,7 @@
 [%%import "../config.h"]
 
+open Efficient_hashtbl
+
 type expr_summary = {
   exp_type : CL.Types.type_expr;
   exp_loc : CL.Location.t;
@@ -110,17 +112,17 @@ and _ se =
                   : if constant check if zero, else mark might_raise *)
 
 let current_module = ref ""
-let temp_variable_label : (string, int) Hashtbl.t = Hashtbl.create 10
+let temp_variable_label : (string, int) t = create 10
 
 let new_temp_var mod_name =
   let temp =
-    match Hashtbl.find temp_variable_label mod_name with
+    match find temp_variable_label mod_name with
     | exception Not_found ->
-      Hashtbl.add temp_variable_label mod_name 0;
+      add temp_variable_label mod_name 0;
       0
     | lbl ->
-      Hashtbl.remove temp_variable_label mod_name;
-      Hashtbl.add temp_variable_label mod_name (lbl + 1);
+      remove temp_variable_label mod_name;
+      add temp_variable_label mod_name (lbl + 1);
       lbl + 1
   in
   let temp_id =
@@ -128,17 +130,17 @@ let new_temp_var mod_name =
   in
   Expr_var (temp_id, mod_name)
 
-let address : (string, int) Hashtbl.t = Hashtbl.create 10
+let address : (string, int) t = create 10
 
 let new_memory mod_name =
   let mem =
-    match Hashtbl.find address mod_name with
+    match find address mod_name with
     | exception Not_found ->
-      Hashtbl.add address mod_name 0;
+      add address mod_name 0;
       0
     | addr ->
-      Hashtbl.remove address mod_name;
-      Hashtbl.add address mod_name (addr + 1);
+      remove address mod_name;
+      add address mod_name (addr + 1);
       addr + 1
   in
   (mem, mod_name)
@@ -156,24 +158,22 @@ end
 module SESet = Set.Make (SE)
 
 module Worklist = struct
-  type t = (int, unit) Hashtbl.t
+  type t = (int, unit) Efficient_hashtbl.t
 
-  let add x (worklist : t) =
-    if Hashtbl.mem worklist x then () else Hashtbl.add worklist x ()
-
-  let mem x (worklist : t) = Hashtbl.mem worklist x
+  let add x (worklist : t) = if mem worklist x then () else add worklist x ()
+  let mem x (worklist : t) = mem worklist x
 
   let prepare_step (worklist : t) (prev_worklist : t) =
-    Hashtbl.reset prev_worklist;
-    Hashtbl.iter (fun x () -> Hashtbl.add prev_worklist x ()) worklist;
-    Hashtbl.reset worklist
+    reset prev_worklist;
+    iter (fun x () -> add x prev_worklist) worklist;
+    reset worklist
 end
 
-let worklist : Worklist.t = Hashtbl.create 10
-let reverse_mem : (loc, Worklist.t) Hashtbl.t = Hashtbl.create 10
-let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
-let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
-let hash = Hashtbl.hash
+let worklist : Worklist.t = create 10
+let reverse_mem : (loc, Worklist.t) t = create 10
+let current_file : (CL.Ident.t, SESet.t) t ref = ref (create 10)
+let sc : (value se, SESet.t) t = create 256
+let hash = hash
 
 let update_worklist set =
   let summarize = function
@@ -187,43 +187,45 @@ let update_worklist set =
 let update_sc key data =
   let set = SESet.of_list data in
   update_worklist set;
-  if Hashtbl.mem sc key then (
-    let original = Hashtbl.find sc key in
-    Hashtbl.remove sc key;
-    Hashtbl.add sc key (SESet.union original set))
+  if mem sc key then (
+    let original = find sc key in
+    remove sc key;
+    add sc key (SESet.union original set))
   else (
-    Hashtbl.add sc key set;
+    add sc key set;
     update_worklist (SESet.singleton key))
 
-type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
+type var_se_tbl = (string, (CL.Ident.t, SESet.t) t) t
 
-let var_to_se : var_se_tbl = Hashtbl.create 256
+let var_to_se : var_se_tbl = create 10
 
 let update_var key data =
   let set = SESet.of_list data in
-  Hashtbl.add !current_file key set;
-  if Hashtbl.mem var_to_se key then (
-    let original = Hashtbl.find var_to_se key in
-    Hashtbl.remove var_to_se key;
-    Hashtbl.add var_to_se key (SESet.union original set))
-  else Hashtbl.add var_to_se key set
+  match find var_to_se !current_module with
+  | exception Not_found ->
+    let tbl = create 10 in
+    add tbl key set;
+    add var_to_se !current_module tbl
+  | tbl -> (
+    match find tbl key with
+    | exception Not_found -> add tbl key set
+    | original ->
+      remove tbl key;
+      add tbl key (SESet.union original set))
 
-type to_be_resolved = (loc, CL.Path.t * string) Hashtbl.t
+type to_be_resolved = (loc, CL.Path.t * string) t
 
-let to_be_resolved : to_be_resolved = Hashtbl.create 256
-
-let update_to_be key data =
-  Hashtbl.add to_be_resolved key (data, !current_module)
-
-let mem : (loc, SESet.t) Hashtbl.t = Hashtbl.create 256
+let to_be_resolved : to_be_resolved = create 256
+let update_to_be key data = add to_be_resolved key (data, !current_module)
+let memory : (loc, SESet.t) t = create 256
 
 let update_mem key data =
   let set = SESet.of_list data in
-  if Hashtbl.mem mem key then (
-    let original = Hashtbl.find mem key in
-    Hashtbl.remove mem key;
-    Hashtbl.add mem key (SESet.union original set))
-  else Hashtbl.add mem key set
+  if mem memory key then (
+    let original = find memory key in
+    remove memory key;
+    add memory key (SESet.union original set))
+  else add memory key set
 
 let list_to_array l =
   let len = List.length l in
@@ -242,37 +244,39 @@ let list_to_array l =
     done;
     arr
 
-let se_of_var x =
-  let se_list =
-    try SESet.elements (Hashtbl.find var_to_se x)
-    with err ->
+let se_of_var x context =
+  let local_tbl = find var_to_se context in
+  try SESet.elements (find local_tbl x)
+  with Not_found -> (
+    try
+      let global_tbl = find var_to_se (CL.Ident.name x) in
+      SESet.elements (find global_tbl x)
+    with Not_found ->
       if !Common.Cli.debug then
         prerr_string
           ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
-      raise err
-  in
-  se_list
+      raise Not_found)
 
-let expression_label : (string, int) Hashtbl.t = Hashtbl.create 10
-let label_to_summary : (loc, code_loc) Hashtbl.t = Hashtbl.create 10
-let summary_to_label : (code_loc, loc) Hashtbl.t = Hashtbl.create 10
+let expression_label : (string, int) t = create 10
+let label_to_summary : (loc, code_loc) t = create 10
+let summary_to_label : (code_loc, loc) t = create 10
 
 let loc_of_summary summary =
-  match Hashtbl.find summary_to_label summary with
+  match find summary_to_label summary with
   | exception Not_found ->
     let loc_label =
-      match Hashtbl.find expression_label !current_module with
+      match find expression_label !current_module with
       | exception Not_found ->
-        Hashtbl.add expression_label !current_module 0;
+        add expression_label !current_module 0;
         0
       | i ->
-        Hashtbl.remove expression_label !current_module;
-        Hashtbl.add expression_label !current_module (i + 1);
+        remove expression_label !current_module;
+        add expression_label !current_module (i + 1);
         i + 1
     in
     let lbl = (loc_label, !current_module) in
-    Hashtbl.add label_to_summary lbl summary;
-    Hashtbl.add summary_to_label summary lbl;
+    add label_to_summary lbl summary;
+    add summary_to_label summary lbl;
     lbl
   | lbl -> lbl
 
@@ -326,14 +330,14 @@ let se_of_mb (mb : CL.Typedtree.module_binding) =
   | {mb_expr} -> ([], [packet_of_mod mb_expr])
 
 let se_of_vb (vb : CL.Typedtree.value_binding) =
-  let local_binding : (string, value se list) Hashtbl.t = Hashtbl.create 10 in
+  let local_binding : (string, value se list) t = create 10 in
   (* update the table *)
   let update_tbl key data =
-    if Hashtbl.mem local_binding key then (
-      let original = Hashtbl.find local_binding key in
-      Hashtbl.remove local_binding key;
-      Hashtbl.add local_binding key (data :: original))
-    else Hashtbl.add local_binding key [data]
+    if mem local_binding key then (
+      let original = find local_binding key in
+      remove local_binding key;
+      add local_binding key (data :: original))
+    else add local_binding key [data]
   in
   (* update the table while traversing the pattern *)
   let rec solve_eq (pat : CL.Typedtree.pattern) se =
@@ -408,7 +412,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
      Ctor (Some name, Static [|mem|]))
     :: acc
   in
-  let seq_of_bindings = Hashtbl.to_seq local_binding in
+  let seq_of_bindings = to_seq local_binding in
   let ctor_list = Seq.fold_left for_each_binding [] seq_of_bindings in
   (ctor_list, [packet_of_expr vb.vb_expr])
 
@@ -676,7 +680,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     ([val_of_expr e], packet_of_expr e :: p)
   | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
   | Texp_ident (CL.Path.Pident x, _, _) -> (
-    match Hashtbl.find !current_file x with
+    match find !current_file x with
     | set -> (SESet.elements set, [])
     | exception Not_found ->
       update_to_be (loc_of_expr expr) (Pident x);
@@ -826,7 +830,9 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let bound = (val_of_expr let_.bop_exp, [packet_of_expr let_.bop_exp]) in
     let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
       let and_path = andop.bop_op_path in
-      let and_val = Var (Val (Expr (loc_of_summary (Bop_loc andop.bop_op_val)))) in
+      let and_val =
+        Var (Val (Expr (loc_of_summary (Bop_loc andop.bop_op_val))))
+      in
       let bound_val = val_of_expr andop.bop_exp in
       let exn = packet_of_expr andop.bop_exp in
       let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
@@ -854,8 +860,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 
 (* for resolution *)
 let changed = ref false
-let prev_worklist = Hashtbl.create 10
-let exn_of_file = Hashtbl.create 10
+let prev_worklist = create 10
+let exn_of_file = create 10
 
 module GE = struct
   type t = pattern se
@@ -868,11 +874,11 @@ module GESet = Set.Make (GE)
 let update_worklist_g key set =
   let update_l = function
     | Loc (l, None) -> (
-      match Hashtbl.find reverse_mem l with
+      match find reverse_mem l with
       | exception Not_found ->
-        let new_tbl = Hashtbl.create 1 in
-        Hashtbl.add new_tbl (hash key) ();
-        Hashtbl.add reverse_mem l new_tbl
+        let new_tbl = create 1 in
+        add new_tbl (hash key) ();
+        add reverse_mem l new_tbl
       | original -> Worklist.add (hash key) original)
     | _ -> ()
   in
@@ -884,96 +890,96 @@ let update_worklist_g key set =
   Worklist.add (hash key) worklist
 
 let update_exn_of_file (key : string) (data : value se list) =
-  Hashtbl.add exn_of_file key data
+  add exn_of_file key data
 
 let update_c key set =
-  if Hashtbl.mem sc key then
-    let original = Hashtbl.find sc key in
+  if mem sc key then
+    let original = find sc key in
     if SESet.mem Top original then false
     else
       let diff = SESet.diff set original in
       if SESet.is_empty diff then false
       else (
-        Hashtbl.remove sc key;
-        if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
-        else Hashtbl.add sc key (SESet.union original diff);
+        remove sc key;
+        if SESet.mem Top diff then add sc key (SESet.singleton Top)
+        else add sc key (SESet.union original diff);
         update_worklist (SESet.add key diff);
         changed := true;
         true)
   else (
-    Hashtbl.add sc key set;
+    add sc key set;
     update_worklist (SESet.add key set);
     changed := true;
     true)
 
 let consult_reverse_mem key =
-  match Hashtbl.find reverse_mem key with
+  match find reverse_mem key with
   | exception Not_found -> ()
-  | affected -> Hashtbl.iter (fun x () -> Worklist.add x worklist) affected
+  | affected -> iter (fun x () -> Worklist.add x worklist) affected
 
 let update_loc key set =
-  if Hashtbl.mem mem key then
-    let original = Hashtbl.find mem key in
+  if mem memory key then
+    let original = find memory key in
     if SESet.mem Top original then false
     else
       let diff = SESet.diff set original in
       if SESet.is_empty diff then false
       else (
-        Hashtbl.remove mem key;
-        if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
-        else Hashtbl.add mem key (SESet.union original diff);
+        remove memory key;
+        if SESet.mem Top diff then add memory key (SESet.singleton Top)
+        else add memory key (SESet.union original diff);
         update_worklist diff;
         consult_reverse_mem key;
         changed := true;
         true)
   else (
-    Hashtbl.add mem key set;
+    add memory key set;
     update_worklist set;
     consult_reverse_mem key;
     changed := true;
     true)
 
-let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
+let grammar : (pattern se, GESet.t) t = create 256
 
 let update_g var set =
   let key = Var var in
-  if Hashtbl.mem grammar key then
-    let original = Hashtbl.find grammar key in
+  if mem grammar key then
+    let original = find grammar key in
     if GESet.mem Top original then false
     else
       let diff = GESet.diff set original in
       if GESet.is_empty diff then false
       else (
-        Hashtbl.remove grammar key;
-        if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
-        else Hashtbl.add grammar key (GESet.union original diff);
+        remove grammar key;
+        if GESet.mem Top diff then add grammar key (GESet.singleton Top)
+        else add grammar key (GESet.union original diff);
         update_worklist_g key diff;
         changed := true;
         true)
   else (
-    Hashtbl.add grammar key set;
+    add grammar key set;
     update_worklist_g key set;
     changed := true;
     true)
 
-let abs_mem : (loc, GESet.t) Hashtbl.t = Hashtbl.create 256
+let abs_mem : (loc, GESet.t) t = create 256
 
 let update_abs_loc key set =
-  if Hashtbl.mem abs_mem key then
-    let original = Hashtbl.find abs_mem key in
+  if mem abs_mem key then
+    let original = find abs_mem key in
     if GESet.mem Top original then false
     else
       let diff = GESet.diff set original in
       if GESet.is_empty diff then false
       else (
-        Hashtbl.remove abs_mem key;
-        if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
-        else Hashtbl.add abs_mem key (GESet.union original diff);
+        remove abs_mem key;
+        if GESet.mem Top diff then add abs_mem key (GESet.singleton Top)
+        else add abs_mem key (GESet.union original diff);
         consult_reverse_mem key;
         changed := true;
         true)
   else (
-    Hashtbl.add abs_mem key set;
+    add abs_mem key set;
     consult_reverse_mem key;
     changed := true;
     true)

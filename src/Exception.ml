@@ -6,7 +6,7 @@ open Reduce
 
 let rec resolve_path (path : Path.t) (context : string) =
   match path with
-  | Pident x -> se_of_var x
+  | Pident x -> se_of_var x context
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let m_temp = Var (Val (new_temp_var context)) in
     let m = resolve_path m context in
@@ -32,7 +32,7 @@ let resolve_to_be_resolved () =
     with _ ->
       if !Common.Cli.debug then (
         let loc =
-          match Hashtbl.find label_to_summary loc with
+          match Efficient_hashtbl.find label_to_summary loc with
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
@@ -41,7 +41,7 @@ let resolve_to_be_resolved () =
         Location.print_loc Format.str_formatter loc;
         prerr_string (Format.flush_str_formatter () ^ "\n"))
   in
-  Hashtbl.iter resolve to_be_resolved
+  Efficient_hashtbl.iter resolve to_be_resolved
 
 let traverse_ast () =
   let super = Tast_mapper.default in
@@ -76,7 +76,7 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
-    current_file := Hashtbl.create 10;
+    current_file := Efficient_hashtbl.create 10;
     update_var id v;
     update_exn_of_file filename p;
     structure |> process_structure
