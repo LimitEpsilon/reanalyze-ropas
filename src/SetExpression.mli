@@ -94,11 +94,13 @@ module Worklist : sig
   val prepare_step : t -> t -> unit
 end
 
+val linking : bool ref
 val worklist : Worklist.t
-val current_file : (CL.Ident.t, SESet.t) Efficient_hashtbl.t ref
-val sc : (value se, SESet.t) Efficient_hashtbl.t
+val sc : (string, (value se, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
+val lookup_sc : value se -> SESet.t
 val update_sc : value se -> SESet.elt list -> unit
-val memory : (loc, SESet.t) Efficient_hashtbl.t
+val memory : (string, (loc, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
+val lookup_mem : loc -> SESet.t
 
 type var_se_tbl =
   (string, (CL.Ident.t, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t

@@ -221,7 +221,7 @@ let resolve_var var set =
             | App_V (Prim p, l) ->
               if arg_len l < p.prim_arity then true else false
             | _ -> false)
-          (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty)
+          (try lookup_sc (Var x) with _ -> SESet.empty)
       in
       update_c (Var var) set |> ignore;
       if Efficient_hashtbl.mem grammar (Var x) then
@@ -247,7 +247,7 @@ let resolve_var var set =
             let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
             update_c (Var var) set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_P (Var x, []) when Worklist.mem (hash (Var x)) prev_worklist ->
@@ -258,7 +258,7 @@ let resolve_var var set =
             let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
             update_c (Var var) set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_V (Var x, Some (Var y) :: tl)
@@ -291,7 +291,7 @@ let resolve_var var set =
             in
             update_c (Var var) app |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_P (Var x, Some (Var y) :: tl)
@@ -325,7 +325,7 @@ let resolve_var var set =
             in
             update_c (Var var) app |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | Fld (Var x, (None, Some i)) when Worklist.mem (hash (Var x)) prev_worklist
@@ -345,7 +345,7 @@ let resolve_var var set =
                       | App_V (Prim p, l) ->
                         if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
-                    (try Efficient_hashtbl.find memory l with _ -> SESet.empty)
+                    (try lookup_mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
               else SESet.empty
             in
@@ -380,7 +380,7 @@ let resolve_var var set =
                       | App_V (Prim p, l) ->
                         if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
-                    (try Efficient_hashtbl.find memory l with _ -> SESet.empty)
+                    (try lookup_mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
               else SESet.empty
             in
@@ -420,7 +420,7 @@ let rec auxiliary_back_propagate var =
     back_propagated_vars := SESet.add var !back_propagated_vars;
     SESet.iter
       (function Var x -> auxiliary_back_propagate (Var x) | _ -> ())
-      (try Efficient_hashtbl.find sc var with _ -> SESet.empty))
+      (try lookup_sc var with _ -> SESet.empty))
 
 let back_propagate var set =
   back_propagated_vars := SESet.empty;
@@ -451,7 +451,7 @@ let resolve_update (var, i) set =
       p_set
   | exception _ -> ()
 
-let step_sc () =
+let step_sc_for_file tbl =
   Efficient_hashtbl.iter
     (fun x set ->
       match x with
@@ -462,7 +462,13 @@ let step_sc () =
         time_spent_in_update :=
           !time_spent_in_update +. (Unix.gettimeofday () -. t)
       | _ -> ())
-    sc
+    tbl
+
+let step_sc added_file =
+  try
+    if !linking then Efficient_hashtbl.iter (fun _ sc -> step_sc_for_file sc) sc
+    else step_sc_for_file (Efficient_hashtbl.find sc added_file)
+  with Not_found -> ()
 
 let resolve_mem loc set =
   let resolve elt =
@@ -490,7 +496,7 @@ let resolve_mem loc set =
             | App_V (Prim p, l) ->
               if arg_len l < p.prim_arity then true else false
             | _ -> false)
-          (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty)
+          (try lookup_sc (Var x) with _ -> SESet.empty)
       in
       update_loc loc set |> ignore;
       if Efficient_hashtbl.mem grammar (Var x) then
@@ -516,7 +522,7 @@ let resolve_mem loc set =
             let set = SESet.of_list (List.map (fun x -> Var (Val x)) l) in
             update_loc loc set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_P (Var x, []) when Worklist.mem (hash (Var x)) prev_worklist ->
@@ -527,7 +533,7 @@ let resolve_mem loc set =
             let set = SESet.of_list (List.map (fun x -> Var (Packet x)) l) in
             update_loc loc set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_V (Var x, Some (Var y) :: tl)
@@ -560,7 +566,7 @@ let resolve_mem loc set =
             in
             update_loc loc app |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | App_P (Var x, Some (Var y) :: tl)
@@ -594,7 +600,7 @@ let resolve_mem loc set =
             in
             update_loc loc app |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find sc (Var x) with _ -> SESet.empty);
+        (try lookup_sc (Var x) with _ -> SESet.empty);
       time_spent_in_closure :=
         !time_spent_in_closure +. (Unix.gettimeofday () -. t)
     | Fld (Var x, (None, Some i)) when Worklist.mem (hash (Var x)) prev_worklist
@@ -614,7 +620,7 @@ let resolve_mem loc set =
                       | App_V (Prim p, l) ->
                         if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
-                    (try Efficient_hashtbl.find memory l with _ -> SESet.empty)
+                    (try lookup_mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
               else SESet.empty
             in
@@ -649,7 +655,7 @@ let resolve_mem loc set =
                       | App_V (Prim p, l) ->
                         if p.prim_arity <> arg_len l then true else false
                       | _ -> false)
-                    (try Efficient_hashtbl.find memory l with _ -> SESet.empty)
+                    (try lookup_mem l with _ -> SESet.empty)
                 | _ -> SESet.empty
               else SESet.empty
             in
@@ -676,20 +682,28 @@ let resolve_mem loc set =
   in
   SESet.iter resolve set
 
-let step_mem () = Efficient_hashtbl.iter resolve_mem memory
+let step_mem_for_file tbl = Efficient_hashtbl.iter resolve_mem tbl
+
+let step_mem added_file =
+  try
+    if !linking then
+      Efficient_hashtbl.iter (fun _ memory -> step_mem_for_file memory) memory
+    else step_mem_for_file (Efficient_hashtbl.find memory added_file)
+  with Not_found -> ()
 
 let prepare_step () =
   changed := false;
   Worklist.prepare_step worklist prev_worklist
 
-let solve () =
+let solve added_file =
   Format.flush_str_formatter () |> ignore;
   prepare_step ();
-  step_sc ();
-  step_mem ();
-  first := false;
+  if not !linking then first := true;
+  step_sc added_file;
+  step_mem added_file;
+  if not !linking then first := false;
   while !changed do
     prepare_step ();
-    step_sc ();
-    step_mem ()
+    step_sc added_file;
+    step_mem added_file
   done

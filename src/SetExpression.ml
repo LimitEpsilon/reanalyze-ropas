@@ -169,10 +169,10 @@ module Worklist = struct
     reset worklist
 end
 
+let linking = ref false
 let worklist : Worklist.t = create 10
 let reverse_mem : (loc, Worklist.t) t = create 10
-let current_file : (CL.Ident.t, SESet.t) t ref = ref (create 10)
-let sc : (value se, SESet.t) t = create 256
+let sc : (string, (value se, SESet.t) t) t = create 10
 let hash = hash
 
 let update_worklist set =
@@ -184,7 +184,36 @@ let update_worklist set =
   in
   SESet.iter summarize set
 
+let get_context_fld = function
+  | Fld
+      ( Var
+          ( Val (Expr (_, ctx) | Expr_var (_, ctx))
+          | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ),
+        _ ) ->
+    ctx
+  | _ -> assert false
+
+let get_context = function
+  | Var
+      ( Val (Expr (_, ctx) | Expr_var (_, ctx))
+      | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ) ->
+    ctx
+  | _ -> assert false
+
+let lookup_sc key =
+  let context = try get_context key with _ -> get_context_fld key in
+  find (find sc context) key
+
 let update_sc key data =
+  let context = try get_context key with _ -> get_context_fld key in
+  let sc =
+    match find sc context with
+    | exception Not_found ->
+      let tbl = create 10 in
+      add sc !current_module tbl;
+      tbl
+    | tbl -> tbl
+  in
   let set = SESet.of_list data in
   update_worklist set;
   if mem sc key then (
@@ -217,9 +246,22 @@ type to_be_resolved = (loc, CL.Path.t * string) t
 
 let to_be_resolved : to_be_resolved = create 256
 let update_to_be key data = add to_be_resolved key (data, !current_module)
-let memory : (loc, SESet.t) t = create 256
+let memory : (string, (loc, SESet.t) t) t = create 10
+
+let lookup_mem key =
+  let _, context = key in
+  find (find memory context) key
 
 let update_mem key data =
+  let _, context = key in
+  let memory =
+    match find memory context with
+    | exception Not_found ->
+      let tbl = create 10 in
+      add memory !current_module tbl;
+      tbl
+    | tbl -> tbl
+  in
   let set = SESet.of_list data in
   if mem memory key then (
     let original = find memory key in
@@ -247,15 +289,17 @@ let list_to_array l =
 let se_of_var x context =
   let local_tbl = find var_to_se context in
   try SESet.elements (find local_tbl x)
-  with Not_found -> (
-    try
-      let global_tbl = find var_to_se (CL.Ident.name x) in
-      SESet.elements (find global_tbl x)
-    with Not_found ->
-      if !Common.Cli.debug then
-        prerr_string
-          ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
-      raise Not_found)
+  with Not_found ->
+    if !linking then (
+      try
+        let global_tbl = find var_to_se (CL.Ident.name x) in
+        SESet.elements (find global_tbl x)
+      with Not_found ->
+        if !Common.Cli.debug then
+          prerr_string
+            ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
+        raise Not_found)
+    else raise Not_found
 
 let expression_label : (string, int) t = create 10
 let label_to_summary : (loc, code_loc) t = create 10
@@ -679,12 +723,6 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let p = List.flatten p in
     ([val_of_expr e], packet_of_expr e :: p)
   | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
-  | Texp_ident (CL.Path.Pident x, _, _) -> (
-    match find !current_file x with
-    | set -> (SESet.elements set, [])
-    | exception Not_found ->
-      update_to_be (loc_of_expr expr) (Pident x);
-      ([], []))
   | Texp_ident (x, _, _) ->
     update_to_be (loc_of_expr expr) x;
     ([], [])
@@ -893,6 +931,8 @@ let update_exn_of_file (key : string) (data : value se list) =
   add exn_of_file key data
 
 let update_c key set =
+  let context = try get_context key with _ -> get_context_fld key in
+  let sc = find sc context in
   if mem sc key then
     let original = find sc key in
     if SESet.mem Top original then false
@@ -918,6 +958,8 @@ let consult_reverse_mem key =
   | affected -> iter (fun x () -> Worklist.add x worklist) affected
 
 let update_loc key set =
+  let _, context = key in
+  let memory = find memory context in
   if mem memory key then
     let original = find memory key in
     if SESet.mem Top original then false

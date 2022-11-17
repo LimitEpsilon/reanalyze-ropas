@@ -277,8 +277,10 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
         tbl)
     var_to_se
 
-let show_mem (mem : (loc, SESet.t) Efficient_hashtbl.t) =
+let show_mem
+    (mem : (string, (loc, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t) =
   Efficient_hashtbl.iter
+  (fun _ mem ->Efficient_hashtbl.iter
     (fun (key, _) data ->
       if SESet.is_empty data then ()
       else (
@@ -287,21 +289,27 @@ let show_mem (mem : (loc, SESet.t) Efficient_hashtbl.t) =
         prerr_newline ();
         show_se_with_separator data "\t";
         prerr_newline ()))
-    mem
+    mem)
+  mem
 
-let show_sc_tbl (tbl : (value se, SESet.t) Efficient_hashtbl.t) =
+let show_sc_tbl
+    (tbl :
+      (string, (value se, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t) =
   Efficient_hashtbl.iter
-    (fun key data ->
-      if SESet.is_empty data then ()
-      else (
-        prerr_string "sc :\n";
-        print_se key;
-        (match key with
-        | Fld (_, _) -> prerr_string " <- "
-        | _ -> prerr_string " = ");
-        prerr_newline ();
-        show_se_with_separator data "\t";
-        prerr_newline ()))
+    (fun _ tbl ->
+      Efficient_hashtbl.iter
+        (fun key data ->
+          if SESet.is_empty data then ()
+          else (
+            prerr_string "sc :\n";
+            print_se key;
+            (match key with
+            | Fld (_, _) -> prerr_string " <- "
+            | _ -> prerr_string " = ");
+            prerr_newline ();
+            show_se_with_separator data "\t";
+            prerr_newline ()))
+        tbl)
     tbl
 
 let show_grammar (g : (pattern se, GESet.t) Efficient_hashtbl.t) =
@@ -356,21 +364,24 @@ let show_exn_of_file (tbl : (string, value se list) Efficient_hashtbl.t) =
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
   Efficient_hashtbl.iter
-    (fun key data ->
-      let set =
-        SESet.filter
-          (fun x ->
-            match x with
-            | App_V (_, _) | Fn (_, _) | Prim _ -> true
-            | _ -> false)
-          data
-      in
-      if SESet.is_empty set then ()
-      else (
-        print_se key;
-        prerr_newline ();
-        show_se_with_separator set "\t";
-        prerr_newline ()))
+    (fun _ tbl ->
+      Efficient_hashtbl.iter
+        (fun key data ->
+          let set =
+            SESet.filter
+              (fun x ->
+                match x with
+                | App_V (_, _) | Fn (_, _) | Prim _ -> true
+                | _ -> false)
+              data
+          in
+          if SESet.is_empty set then ()
+          else (
+            print_se key;
+            prerr_newline ();
+            show_se_with_separator set "\t";
+            prerr_newline ()))
+        tbl)
     tbl
 
 let explain_abs_mem () =
