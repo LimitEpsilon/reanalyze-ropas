@@ -243,7 +243,9 @@ let cli () =
 ;;
 
 (match () with
-| (() [@if defined dev]) -> Memtrace.trace_if_requested ()
+| (() [@if defined dev]) ->
+  Printexc.record_backtrace true;
+  Memtrace.trace_if_requested ()
 | (() [@if not_defined dev]) -> ());
 cli ()
 [@@raises exit]

@@ -94,6 +94,16 @@ module Worklist : sig
   val prepare_step : t -> t -> unit
 end
 
+val new_array : int -> loc array
+val loc_of_summary : code_loc -> loc
+val loc_of_mod : CL.Typedtree.module_expr -> loc
+val expr_of_mod : CL.Typedtree.module_expr -> loc expr
+val val_of_mod : CL.Typedtree.module_expr -> value se
+val packet_of_mod : CL.Typedtree.module_expr -> value se
+val loc_of_expr : CL.Typedtree.expression -> loc
+val expr_of_expr : CL.Typedtree.expression -> loc expr
+val val_of_expr : CL.Typedtree.expression -> value se
+val packet_of_expr : CL.Typedtree.expression -> value se
 val linking : bool ref
 val worklist : Worklist.t
 val sc : (string, (value se, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
@@ -101,42 +111,21 @@ val lookup_sc : value se -> SESet.t
 val update_sc : value se -> SESet.elt list -> unit
 val memory : (string, (loc, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
 val lookup_mem : loc -> SESet.t
+val update_mem : loc -> SESet.elt list -> unit
 
 type var_se_tbl =
   (string, (CL.Ident.t, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t
 
 val var_to_se : var_se_tbl
 val update_var : CL.Ident.t -> SESet.elt list -> unit
+val se_of_var : CL.Ident.t -> string -> SESet.elt list
 
 type to_be_resolved = (loc, CL.Path.t * string) Efficient_hashtbl.t
 
 val to_be_resolved : to_be_resolved
 val update_to_be : loc -> CL.Path.t -> unit
 val label_to_summary : (loc, code_loc) Efficient_hashtbl.t
-
-(* val list_rev_to_array : 'a list -> 'a -> 'a array *)
-(* val list_to_array : 'a list -> 'a -> 'a array *)
-val val_of_expr : CL.Typedtree.expression -> value se
-val packet_of_expr : CL.Typedtree.expression -> value se
-val val_of_mod : CL.Typedtree.module_expr -> value se
-val packet_of_mod : CL.Typedtree.module_expr -> value se
-val se_of_var : CL.Ident.t -> string -> value se list
-val se_of_mb : CL.Typedtree.module_binding -> value se list * value se list
-val se_of_vb : CL.Typedtree.value_binding -> value se list * value se list
-
-val se_of_struct_item :
-  CL.Typedtree.structure_item -> value se list * value se list
-
-val se_of_struct : CL.Typedtree.structure -> value se list * value se list
-
-val se_of_module_expr :
-  CL.Typedtree.module_expr -> value se list * value se list
-
-(* val extract :
- *   'a CL.Typedtree.case ->
- *   ('a CL.Typedtree.general_pattern * bool) * CL.Typedtree.expression *)
-
-val se_of_expr : CL.Typedtree.expression -> value se list * value se list
+val list_to_array : 'a list -> 'a array
 
 (* for resolution *)
 val changed : bool ref

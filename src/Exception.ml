@@ -2,6 +2,7 @@
 
 open CL
 open SetExpression
+open GenerateConstraints
 open Reduce
 
 let rec resolve_path (path : Path.t) (context : string) =
