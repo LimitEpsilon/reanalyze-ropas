@@ -33,39 +33,28 @@ let rec filter_pat = function
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
   | x, p when x = p -> GESet.empty
   | x, Const c -> if x <> Const c then GESet.singleton x else GESet.empty
-  | Top, Ctor_pat (kappa, arr) ->
-    filter_pat
-      (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
-  | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr') ->
-    if kappa <> kappa' || Array.length arr <> Array.length arr' then
-      GESet.singleton (Ctor_pat (kappa, arr))
+  | Top, Ctor_pat (kappa, l) ->
+    filter_pat (Ctor_pat (kappa, List.map (fun _ -> Top) l), Ctor_pat (kappa, l))
+  | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
+    if kappa <> kappa' || List.length l <> List.length l' then
+      GESet.singleton (Ctor_pat (kappa, l))
     else
-      let acc = ref GESet.empty in
-      let i = ref 0 in
-      let arr = Array.copy arr in
-      let len = Array.length arr in
-      while !i < len do
-        let ith = filter_pat (arr.(!i), arr'.(!i)) in
-        let set =
-          GESet.map
-            (fun x ->
-              let temp = Array.copy arr in
-              temp.(!i) <- x;
-              Ctor_pat (kappa, temp))
-            ith
-        in
-        acc := GESet.union !acc set;
-        (if arr'.(!i) <> Top then
-         let update_with =
-           match arr.(!i) with
-           | Loc (l, _) -> Loc (l, Some arr'.(!i))
-           | _ -> arr'.(!i)
-         in
-         arr.(!i) <- update_with);
-        incr i
-      done;
-      !acc
+      let filtered_lists =
+        List.map (fun l -> Ctor_pat (kappa, l)) (diff_list ([], l) l')
+      in
+      GESet.of_list filtered_lists
   | x, _ -> GESet.singleton x
+
+and diff_list (rev_hd, tl) tl' =
+  match (tl, tl') with
+  | [], _ -> []
+  | hd :: tl1, hd' :: tl2 ->
+    let set = filter_pat (hd, hd') in
+    let diff_rest = diff_list (hd :: rev_hd, tl1) tl2 in
+    GESet.fold
+      (fun x acc -> List.rev_append rev_hd (x :: tl1) :: acc)
+      set diff_rest
+  | _ -> []
 
 let rec filter_pat_debug (x, y) =
   prerr_string "\t";
@@ -105,37 +94,16 @@ let rec filter_pat_debug (x, y) =
   | Top, Ctor_pat (kappa, arr) ->
     prerr_endline "lhs = Top, rhs = Ctor, coerce Top into Ctor";
     filter_pat_debug
-      (Ctor_pat (kappa, Array.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
-  | Ctor_pat (kappa, arr), Ctor_pat (kappa', arr') ->
+      (Ctor_pat (kappa, List.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
+  | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
     prerr_endline "lhs, rhs = Ctor";
-    if kappa <> kappa' || Array.length arr <> Array.length arr' then
-      GESet.singleton (Ctor_pat (kappa, arr))
+    if kappa <> kappa' || List.length l <> List.length l' then
+      GESet.singleton (Ctor_pat (kappa, l))
     else
-      let acc = ref GESet.empty in
-      let i = ref 0 in
-      let arr = Array.copy arr in
-      let len = Array.length arr in
-      while !i < len do
-        let ith = filter_pat_debug (arr.(!i), arr'.(!i)) in
-        let set =
-          GESet.map
-            (fun x ->
-              let temp = Array.copy arr in
-              temp.(!i) <- x;
-              Ctor_pat (kappa, temp))
-            ith
-        in
-        acc := GESet.union !acc set;
-        (if arr'.(!i) <> Top then
-         let update_with =
-           match arr.(!i) with
-           | Loc (l, _) -> Loc (l, Some arr'.(!i))
-           | _ -> arr'.(!i)
-         in
-         arr.(!i) <- update_with);
-        incr i
-      done;
-      !acc
+      let filtered_lists =
+        List.map (fun l -> Ctor_pat (kappa, l)) (diff_list ([], l) l')
+      in
+      GESet.of_list filtered_lists
   | x, _ ->
     prerr_endline "else";
     GESet.singleton x
@@ -149,14 +117,14 @@ let value_prim = function
     SESet.singleton (App_V (x, [Some y]))
   | {CL.Primitive.prim_name = "%identity"}, [Some x] -> SESet.singleton x
   | {CL.Primitive.prim_name = "%ignore"}, [Some _] ->
-    SESet.singleton (Ctor (Some "()", Static [||]))
+    SESet.singleton (Ctor (Some "()", Static []))
   | {CL.Primitive.prim_name = "%field0"}, [Some x] ->
     SESet.singleton (Fld (x, (None, Some 0)))
   | {CL.Primitive.prim_name = "%field1"}, [Some x] ->
     SESet.singleton (Fld (x, (None, Some 1)))
   | {CL.Primitive.prim_name = "%setfield0"}, [Some x; Some y] ->
     update_c (Fld (x, (None, Some 0))) (SESet.singleton y) |> ignore;
-    SESet.singleton (Ctor (Some "()", Static [||]))
+    SESet.singleton (Ctor (Some "()", Static []))
   | {CL.Primitive.prim_name = "%makemutable"}, [Some x] ->
     if SESet.mem x !allocated then SESet.empty
     else (
@@ -168,7 +136,7 @@ let value_prim = function
         | _ -> assert false
       in
       update_loc i (SESet.singleton x) |> ignore;
-      SESet.singleton (Ctor (None, Static [|i|])))
+      SESet.singleton (Ctor (None, Static [i])))
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
     SESet.singleton (App_V (x, []))
   | _ -> SESet.singleton Top
@@ -206,11 +174,11 @@ let resolve_var var set =
       let t = Unix.gettimeofday () in
       update_g var (GESet.singleton (Const c)) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Ctor (kappa, Static arr)
+    | Ctor (kappa, Static l)
       when !first || Worklist.mem (hash elt) prev_worklist ->
       let t = Unix.gettimeofday () in
-      let arr' = Array.map (fun i -> Loc (i, None)) arr in
-      update_g var (GESet.singleton (Ctor_pat (kappa, arr'))) |> ignore;
+      let l' = List.map (fun i -> Loc (i, None)) l in
+      update_g var (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
     | Var x when Worklist.mem (hash elt) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -334,10 +302,10 @@ let resolve_var var set =
       GESet.iter
         (function
           | Top -> update_g var (GESet.singleton Top) |> ignore
-          | Ctor_pat (_, arr) ->
+          | Ctor_pat (_, l) ->
             let c_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (l, _) ->
                   SESet.filter
                     (function
@@ -350,8 +318,8 @@ let resolve_var var set =
               else SESet.empty
             in
             let g_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
                   try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
@@ -369,10 +337,10 @@ let resolve_var var set =
       GESet.iter
         (function
           | Top -> update_g var (GESet.singleton Top) |> ignore
-          | Ctor_pat (Some k', arr) when k = k' ->
+          | Ctor_pat (Some k', l) when k = k' ->
             let c_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (l, _) ->
                   SESet.filter
                     (function
@@ -385,8 +353,8 @@ let resolve_var var set =
               else SESet.empty
             in
             let g_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
                   try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
@@ -434,16 +402,22 @@ let resolve_update (var, i) set =
   | p_set ->
     GESet.iter
       (function
-        | Ctor_pat (k, arr) -> (
-          if i < Array.length arr then
-            match arr.(i) with
-            | Loc (l, Some _) ->
-              let temp = Array.copy arr in
-              temp.(i) <- Loc (l, None);
-              let temp_pat = Ctor_pat (k, temp) in
+        | Ctor_pat (k, l) -> (
+          if i < List.length l then
+            match List.nth l i with
+            | Loc (loc, Some _) ->
+              let j = ref (-1) in
+              let temp =
+                List.fold_left
+                  (fun acc x ->
+                    incr j;
+                    if !j = i then Loc (loc, None) :: acc else x :: acc)
+                  [] l
+              in
+              let temp_pat = Ctor_pat (k, List.rev temp) in
               if GESet.mem temp_pat p_set then ()
               else (
-                update_loc l set |> ignore;
+                update_loc loc set |> ignore;
                 back_propagate var (GESet.singleton temp_pat))
             | Loc (l, None) -> update_loc l set |> ignore
             | _ -> ())
@@ -481,11 +455,11 @@ let resolve_mem loc set =
       let t = Unix.gettimeofday () in
       update_abs_loc loc (GESet.singleton (Const c)) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-    | Ctor (kappa, Static arr)
+    | Ctor (kappa, Static l)
       when !first || Worklist.mem (hash elt) prev_worklist ->
       let t = Unix.gettimeofday () in
-      let arr' = Array.map (fun i -> Loc (i, None)) arr in
-      update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, arr'))) |> ignore;
+      let l' = List.map (fun i -> Loc (i, None)) l in
+      update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
       time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
     | Var x when Worklist.mem (hash elt) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -609,10 +583,10 @@ let resolve_mem loc set =
       GESet.iter
         (function
           | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
-          | Ctor_pat (_, arr) ->
+          | Ctor_pat (_, l) ->
             let c_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (l, _) ->
                   SESet.filter
                     (function
@@ -625,8 +599,8 @@ let resolve_mem loc set =
               else SESet.empty
             in
             let g_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
                   try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
@@ -644,10 +618,10 @@ let resolve_mem loc set =
       GESet.iter
         (function
           | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
-          | Ctor_pat (Some k', arr) when k = k' ->
+          | Ctor_pat (Some k', l) when k = k' ->
             let c_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (l, _) ->
                   SESet.filter
                     (function
@@ -660,8 +634,8 @@ let resolve_mem loc set =
               else SESet.empty
             in
             let g_set =
-              if i < Array.length arr then
-                match arr.(i) with
+              if i < List.length l then
+                match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
                   try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)

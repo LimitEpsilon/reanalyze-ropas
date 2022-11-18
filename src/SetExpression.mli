@@ -22,7 +22,7 @@ and _ expr =
   | Expr_var : (CL.Ident.t * string) -> param expr
   | Expr : loc -> loc expr
 
-and arr = Static of loc array | Dynamic of loc
+and arr = Static of loc list | Dynamic of loc
 
 and _ tagged_expr =
   | Val : 'a expr -> 'a tagged_expr
@@ -72,7 +72,7 @@ and _ se =
   | App_V : value se * arg -> value se
   | App_P : value se * arg -> value se
   | Ctor : ctor * arr -> value se
-  | Ctor_pat : ctor * pattern se array -> pattern se
+  | Ctor_pat : ctor * pattern se list -> pattern se
   | Fld : value se * fld -> value se
   | Arith : arithop * value se list -> value se
   | Rel : relop * value se list -> value se

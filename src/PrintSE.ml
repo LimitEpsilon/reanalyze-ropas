@@ -103,7 +103,7 @@ let rec print_se : value se -> unit = function
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string ", ";
-    print_arr_with_separator arr ";";
+    print_list_with_separator arr ";";
     prerr_string ")"
   | Ctor (k, Dynamic (i, _)) ->
     prerr_string "Ctor (";
@@ -150,7 +150,7 @@ and print_pattern : pattern se -> unit = function
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string ", ";
-    print_pattern_arr_with_separator arr ";";
+    print_pattern_list_with_separator arr ";";
     prerr_string ")"
   | Loc ((i, name), p) ->
     prerr_string "(";
@@ -182,14 +182,16 @@ and print_se_list_with_separator l sep =
   done;
   prerr_string "]"
 
-and print_pattern_arr_with_separator arr sep =
-  let len = Array.length arr in
-  let i = ref 0 in
+and print_pattern_list_with_separator l sep =
+  let l' = ref l in
   prerr_string "[";
-  while !i < len do
-    print_pattern arr.(!i);
-    if !i < len - 1 then prerr_string sep;
-    incr i
+  while !l' <> [] do
+    match !l' with
+    | hd :: tl ->
+      print_pattern hd;
+      if tl <> [] then prerr_string sep;
+      l' := tl
+    | _ -> assert false
   done;
   prerr_string "]"
 
@@ -226,14 +228,16 @@ and print_option_list_with_separator l sep =
   done;
   prerr_string "]"
 
-and print_arr_with_separator arr sep =
-  let len = Array.length arr in
-  let i = ref 0 in
+and print_list_with_separator l sep =
+  let l' = ref l in
   prerr_string "[";
-  while !i < len do
-    prerr_int (fst arr.(!i));
-    if !i < len - 1 then prerr_string sep;
-    incr i
+  while !l' <> [] do
+    match !l' with
+    | hd :: tl ->
+      prerr_int (fst hd);
+      if tl <> [] then prerr_string sep;
+      l' := tl
+    | _ -> assert false
   done;
   prerr_string "]"
 
@@ -280,17 +284,18 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
 let show_mem
     (mem : (string, (loc, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t) =
   Efficient_hashtbl.iter
-  (fun _ mem ->Efficient_hashtbl.iter
-    (fun (key, _) data ->
-      if SESet.is_empty data then ()
-      else (
-        prerr_string "mem :\n";
-        prerr_int key;
-        prerr_newline ();
-        show_se_with_separator data "\t";
-        prerr_newline ()))
-    mem)
-  mem
+    (fun _ mem ->
+      Efficient_hashtbl.iter
+        (fun (key, _) data ->
+          if SESet.is_empty data then ()
+          else (
+            prerr_string "mem :\n";
+            prerr_int key;
+            prerr_newline ();
+            show_se_with_separator data "\t";
+            prerr_newline ()))
+        mem)
+    mem
 
 let show_sc_tbl
     (tbl :

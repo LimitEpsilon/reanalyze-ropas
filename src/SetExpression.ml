@@ -27,7 +27,7 @@ and _ expr =
   | Expr : loc -> loc expr
 
 and arr =
-  | Static of loc array
+  | Static of loc list
       (** statically allocated arrays such as records, variants, or tuples *)
   | Dynamic of loc
       (** dynamically allocated array, decoded from the Prim set expression *)
@@ -99,7 +99,7 @@ and _ se =
   | App_P : value se * arg -> value se
       (** possible exn packets / force when arg = nil / prim_p when lhs is Prim *)
   | Ctor : ctor * arr -> value se  (** One ADT to rule them all :D *)
-  | Ctor_pat : ctor * pattern se array -> pattern se
+  | Ctor_pat : ctor * pattern se list -> pattern se
       (** For pattern screening *)
   | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
   | Arith : arithop * value se list -> value se  (** arithmetic operators *)
@@ -121,8 +121,7 @@ let new_temp_var mod_name =
       add temp_variable_label mod_name 0;
       0
     | lbl ->
-      remove temp_variable_label mod_name;
-      add temp_variable_label mod_name (lbl + 1);
+      replace temp_variable_label mod_name (lbl + 1);
       lbl + 1
   in
   let temp_id =
@@ -139,8 +138,7 @@ let new_memory mod_name =
       add address mod_name 0;
       0
     | addr ->
-      remove address mod_name;
-      add address mod_name (addr + 1);
+      replace address mod_name (addr + 1);
       addr + 1
   in
   (mem, mod_name)
@@ -218,8 +216,7 @@ let update_sc key data =
   update_worklist set;
   if mem sc key then (
     let original = find sc key in
-    remove sc key;
-    add sc key (SESet.union original set))
+    replace sc key (SESet.union original set))
   else (
     add sc key set;
     update_worklist (SESet.singleton key))
@@ -239,8 +236,7 @@ let update_var key data =
     match find tbl key with
     | exception Not_found -> add tbl key set
     | original ->
-      remove tbl key;
-      add tbl key (SESet.union original set))
+      replace tbl key (SESet.union original set))
 
 type to_be_resolved = (loc, CL.Path.t * string) t
 
@@ -265,8 +261,7 @@ let update_mem key data =
   let set = SESet.of_list data in
   if mem memory key then (
     let original = find memory key in
-    remove memory key;
-    add memory key (SESet.union original set))
+    replace memory key (SESet.union original set))
   else add memory key set
 
 let list_to_array l =
@@ -314,8 +309,7 @@ let loc_of_summary summary =
         add expression_label !current_module 0;
         0
       | i ->
-        remove expression_label !current_module;
-        add expression_label !current_module (i + 1);
+        replace expression_label !current_module (i + 1);
         i + 1
     in
     let lbl = (loc_label, !current_module) in
@@ -379,7 +373,7 @@ let update_worklist_g key set =
     | _ -> ()
   in
   let summarize = function
-    | Ctor_pat (_, arr) -> Array.iter update_l arr
+    | Ctor_pat (_, arr) -> List.iter update_l arr
     | _ -> ()
   in
   GESet.iter summarize set;
@@ -398,9 +392,8 @@ let update_c key set =
       let diff = SESet.diff set original in
       if SESet.is_empty diff then false
       else (
-        remove sc key;
-        if SESet.mem Top diff then add sc key (SESet.singleton Top)
-        else add sc key (SESet.union original diff);
+        if SESet.mem Top diff then replace sc key (SESet.singleton Top)
+        else replace sc key (SESet.union original diff);
         update_worklist (SESet.add key diff);
         changed := true;
         true)
@@ -425,9 +418,8 @@ let update_loc key set =
       let diff = SESet.diff set original in
       if SESet.is_empty diff then false
       else (
-        remove memory key;
-        if SESet.mem Top diff then add memory key (SESet.singleton Top)
-        else add memory key (SESet.union original diff);
+        if SESet.mem Top diff then replace memory key (SESet.singleton Top)
+        else replace memory key (SESet.union original diff);
         update_worklist diff;
         consult_reverse_mem key;
         changed := true;
@@ -450,9 +442,8 @@ let update_g var set =
       let diff = GESet.diff set original in
       if GESet.is_empty diff then false
       else (
-        remove grammar key;
-        if GESet.mem Top diff then add grammar key (GESet.singleton Top)
-        else add grammar key (GESet.union original diff);
+        if GESet.mem Top diff then replace grammar key (GESet.singleton Top)
+        else replace grammar key (GESet.union original diff);
         update_worklist_g key diff;
         changed := true;
         true)
@@ -472,9 +463,8 @@ let update_abs_loc key set =
       let diff = GESet.diff set original in
       if GESet.is_empty diff then false
       else (
-        remove abs_mem key;
-        if GESet.mem Top diff then add abs_mem key (GESet.singleton Top)
-        else add abs_mem key (GESet.union original diff);
+        if GESet.mem Top diff then replace abs_mem key (GESet.singleton Top)
+        else replace abs_mem key (GESet.union original diff);
         consult_reverse_mem key;
         changed := true;
         true)
