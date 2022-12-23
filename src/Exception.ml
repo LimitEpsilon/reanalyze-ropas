@@ -32,11 +32,11 @@ let resolve_to_be_resolved () =
     let var = Var (Val (Expr loc)) in
     try
       update_sc var (resolve_path path context);
-      Efficient_hashtbl.remove to_be_resolved loc
+      Hashtbl.remove to_be_resolved loc
     with _ ->
-      if !Common.Cli.debug then (
+      if !Common.Cli.debug && !linking then (
         let loc =
-          match Efficient_hashtbl.find label_to_summary loc with
+          match Hashtbl.find label_to_summary loc with
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
@@ -45,7 +45,7 @@ let resolve_to_be_resolved () =
         Location.print_loc Format.str_formatter loc;
         prerr_string (Format.flush_str_formatter () ^ "\n"))
   in
-  Efficient_hashtbl.iter resolve to_be_resolved
+  Hashtbl.iter resolve to_be_resolved
 
 let traverse_ast () =
   let super = Tast_mapper.default in
@@ -73,6 +73,7 @@ let process_structure (structure : Typedtree.structure) =
 let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   let id = Ident.create_persistent cmt_infos.cmt_modname in
   let () = current_module := cmt_infos.cmt_modname in
+  let () = files := StringSet.add !current_module !files in
   let filename =
     match cmt_infos.cmt_sourcefile with None -> "" | Some s -> s
   in

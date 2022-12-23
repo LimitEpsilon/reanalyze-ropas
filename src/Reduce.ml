@@ -20,14 +20,14 @@ let rec filter_pat = function
   | Var x, p ->
     GESet.fold
       (fun y acc -> GESet.union (filter_pat (y, p)) acc)
-      (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty)
+      (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
       GESet.empty
   | Loc (l, None), p ->
     GESet.map
       (fun x -> Loc (l, Some x))
       (GESet.fold
          (fun y acc -> GESet.union (filter_pat (y, p)) acc)
-         (try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
          GESet.empty)
   | Loc (l, Some p), p' ->
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
@@ -72,7 +72,7 @@ let rec filter_pat_debug (x, y) =
     prerr_endline "lhs = var";
     GESet.fold
       (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
-      (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty)
+      (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
       GESet.empty
   | Loc (l, None), p ->
     prerr_endline "lhs = loc";
@@ -80,7 +80,7 @@ let rec filter_pat_debug (x, y) =
       (fun x -> Loc (l, Some x))
       (GESet.fold
          (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
-         (try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
          GESet.empty)
   | Loc (l, Some p), p' ->
     prerr_endline "lhs = loc with pat";
@@ -192,8 +192,8 @@ let resolve_var var set =
           (try lookup_sc (Var x) with _ -> SESet.empty)
       in
       update_c (Var var) set |> ignore;
-      if Efficient_hashtbl.mem grammar (Var x) then
-        update_g var (Efficient_hashtbl.find grammar (Var x)) |> ignore;
+      if Hashtbl.mem grammar (Var x) then
+        update_g var (Hashtbl.find grammar (Var x)) |> ignore;
       time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
     | App_V (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -322,14 +322,14 @@ let resolve_var var set =
                 match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
-                  try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+                  try Hashtbl.find abs_mem l with _ -> GESet.empty)
                 | p -> GESet.singleton p
               else GESet.empty
             in
             update_c (Var var) c_set |> ignore;
             update_g var g_set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty);
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
     | Fld (Var x, (Some k, Some i))
       when Worklist.mem (hash (Var x)) prev_worklist ->
@@ -357,14 +357,14 @@ let resolve_var var set =
                 match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
-                  try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+                  try Hashtbl.find abs_mem l with _ -> GESet.empty)
                 | p -> GESet.singleton p
               else GESet.empty
             in
             update_c (Var var) c_set |> ignore;
             update_g var g_set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty);
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
     | Diff (Var x, p) when Worklist.mem (hash (Var x)) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -398,7 +398,7 @@ let back_propagate var set =
     !back_propagated_vars
 
 let resolve_update (var, i) set =
-  match Efficient_hashtbl.find grammar (Var var) with
+  match Hashtbl.find grammar (Var var) with
   | p_set ->
     GESet.iter
       (function
@@ -426,7 +426,7 @@ let resolve_update (var, i) set =
   | exception _ -> ()
 
 let step_sc_for_file tbl =
-  Efficient_hashtbl.iter
+  Hashtbl.iter
     (fun x set ->
       match x with
       | Var var -> resolve_var var set
@@ -439,10 +439,12 @@ let step_sc_for_file tbl =
     tbl
 
 let step_sc added_file =
-  try
-    if !linking then Efficient_hashtbl.iter (fun _ sc -> step_sc_for_file sc) sc
-    else step_sc_for_file (Efficient_hashtbl.find sc added_file)
-  with Not_found -> ()
+  if !linking then
+    StringSet.iter
+      (fun file ->
+        try step_sc_for_file (Hashtbl.find sc file) with Not_found -> ())
+      !files
+  else try step_sc_for_file (Hashtbl.find sc added_file) with Not_found -> ()
 
 let resolve_mem loc set =
   let resolve elt =
@@ -473,8 +475,8 @@ let resolve_mem loc set =
           (try lookup_sc (Var x) with _ -> SESet.empty)
       in
       update_loc loc set |> ignore;
-      if Efficient_hashtbl.mem grammar (Var x) then
-        update_abs_loc loc (Efficient_hashtbl.find grammar (Var x)) |> ignore;
+      if Hashtbl.mem grammar (Var x) then
+        update_abs_loc loc (Hashtbl.find grammar (Var x)) |> ignore;
       time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
     | App_V (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -603,14 +605,14 @@ let resolve_mem loc set =
                 match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
-                  try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+                  try Hashtbl.find abs_mem l with _ -> GESet.empty)
                 | p -> GESet.singleton p
               else GESet.empty
             in
             update_loc loc c_set |> ignore;
             update_abs_loc loc g_set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty);
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
     | Fld (Var x, (Some k, Some i))
       when Worklist.mem (hash (Var x)) prev_worklist ->
@@ -638,14 +640,14 @@ let resolve_mem loc set =
                 match List.nth l i with
                 | Loc (_, Some p) -> GESet.singleton p
                 | Loc (l, None) -> (
-                  try Efficient_hashtbl.find abs_mem l with _ -> GESet.empty)
+                  try Hashtbl.find abs_mem l with _ -> GESet.empty)
                 | p -> GESet.singleton p
               else GESet.empty
             in
             update_loc loc c_set |> ignore;
             update_abs_loc loc g_set |> ignore
           | _ -> ())
-        (try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty);
+        (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
       time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
     | Diff (Var x, p) when Worklist.mem (hash (Var x)) prev_worklist ->
       let t = Unix.gettimeofday () in
@@ -656,14 +658,17 @@ let resolve_mem loc set =
   in
   SESet.iter resolve set
 
-let step_mem_for_file tbl = Efficient_hashtbl.iter resolve_mem tbl
+let step_mem_for_file tbl = Hashtbl.iter resolve_mem tbl
 
 let step_mem added_file =
-  try
-    if !linking then
-      Efficient_hashtbl.iter (fun _ memory -> step_mem_for_file memory) memory
-    else step_mem_for_file (Efficient_hashtbl.find memory added_file)
-  with Not_found -> ()
+  if !linking then
+    StringSet.iter
+      (fun file ->
+        try step_mem_for_file (Hashtbl.find memory file) with Not_found -> ())
+      !files
+  else
+    try step_mem_for_file (Hashtbl.find memory added_file)
+    with Not_found -> ()
 
 let prepare_step () =
   changed := false;

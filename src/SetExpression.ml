@@ -1,6 +1,6 @@
 [%%import "../config.h"]
 
-open Efficient_hashtbl
+open Hashtbl
 
 type expr_summary = {
   exp_type : CL.Types.type_expr;
@@ -111,7 +111,10 @@ and _ se =
                   : if identifier look up in var_to_se to check if constant
                   : if constant check if zero, else mark might_raise *)
 
+module StringSet = Set.Make (String)
+
 let current_module = ref ""
+let files = ref StringSet.empty
 let temp_variable_label : (string, int) t = create 10
 
 let new_temp_var mod_name =
@@ -156,7 +159,7 @@ end
 module SESet = Set.Make (SE)
 
 module Worklist = struct
-  type t = (int, unit) Efficient_hashtbl.t
+  type t = (int, unit) Hashtbl.t
 
   let add x (worklist : t) = if mem worklist x then () else add worklist x ()
   let mem x (worklist : t) = mem worklist x
@@ -214,9 +217,9 @@ let update_sc key data =
   in
   let set = SESet.of_list data in
   update_worklist set;
-  if mem sc key then (
+  if mem sc key then
     let original = find sc key in
-    replace sc key (SESet.union original set))
+    replace sc key (SESet.union original set)
   else (
     add sc key set;
     update_worklist (SESet.singleton key))
@@ -235,8 +238,7 @@ let update_var key data =
   | tbl -> (
     match find tbl key with
     | exception Not_found -> add tbl key set
-    | original ->
-      replace tbl key (SESet.union original set))
+    | original -> replace tbl key (SESet.union original set))
 
 type to_be_resolved = (loc, CL.Path.t * string) t
 
@@ -259,9 +261,9 @@ let update_mem key data =
     | tbl -> tbl
   in
   let set = SESet.of_list data in
-  if mem memory key then (
+  if mem memory key then
     let original = find memory key in
-    replace memory key (SESet.union original set))
+    replace memory key (SESet.union original set)
   else add memory key set
 
 let list_to_array l =

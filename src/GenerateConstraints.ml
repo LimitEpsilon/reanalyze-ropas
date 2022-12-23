@@ -1,6 +1,6 @@
 [%%import "../config.h"]
 
-open Efficient_hashtbl
+open Hashtbl
 open SetExpression
 
 (** se_of_something returns (value_of_something, packet_of_something) *)
@@ -18,8 +18,7 @@ let se_of_mb (mb : CL.Typedtree.module_binding) =
     let mem = new_memory !current_module in
     update_var mb_id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ( [Ctor (Some (CL.Ident.name mb_id), Static [mem])],
-      [packet_of_mod mb_expr] )
+    ([Ctor (Some (CL.Ident.name mb_id), Static [mem])], [packet_of_mod mb_expr])
   | {mb_expr} -> ([], [packet_of_mod mb_expr])
 
 let se_of_vb (vb : CL.Typedtree.value_binding) =
@@ -413,7 +412,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       in
       let () =
         match def with
-        | Kept _ -> update_mem mem [kept]
+        | ((Kept _) [@if ocaml_version < (5, 0, 0) || defined npm]) ->
+          update_mem mem [kept]
+        | ((Kept (_, _)) [@if ocaml_version >= (5, 0, 0) && not_defined npm]) ->
+          update_mem mem [kept]
         | Overridden (_, e) -> update_mem mem [val_of_expr e]
       in
       mem
@@ -427,7 +429,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       | Some e -> packet_of_expr e :: exns
       | _ -> exns
     in
-    ([Ctor (None, Static (Array.to_list (Array.map for_each_field fields)))], exns)
+    ( [Ctor (None, Static (Array.to_list (Array.map for_each_field fields)))],
+      exns )
   | Texp_field (e, _, lbl) ->
     let i = lbl.lbl_pos in
     ([Fld (val_of_expr e, (None, Some i))], [packet_of_expr e])

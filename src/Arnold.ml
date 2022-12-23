@@ -878,7 +878,8 @@ module Compile = struct
                 )
               ->
                 match recordLabelDefinition with
-                | Kept _typeExpr -> None
+                | (Kept _ [@if ocaml_version < (5, 0, 0)])-> None
+                | (Kept (_, _) [@if ocaml_version >= (5, 0, 0)]) -> None
                 | Overridden (_loc, e) -> Some e))
       |> List.map (expressionOpt ~ctx)
       |> Command.unorderedSequence

@@ -216,7 +216,8 @@ and processExpr ~funDef ~env ~mem (expr : CL.Typedtree.expression) =
     fields
     |> Array.iteri (fun i (_ld, (rld : CL.Typedtree.record_label_definition)) ->
            match rld with
-           | Kept _ -> assert false
+           | (Kept _ [@if ocaml_version < (5, 0, 0)])-> assert false
+           | (Kept (_, _) [@if ocaml_version >= (5, 0, 0)]) -> assert false
            | Overridden ({loc}, e) ->
              let size = e.exp_type |> sizeOfTyp ~loc in
              let index = mem |> Il.Mem.alloc ~size in

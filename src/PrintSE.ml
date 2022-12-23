@@ -45,7 +45,7 @@ let print_code_loc loc =
   prerr_string (Format.flush_str_formatter ())
 
 let print_loc loc =
-  match Efficient_hashtbl.find label_to_summary loc with
+  match Hashtbl.find label_to_summary loc with
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
@@ -242,7 +242,7 @@ and print_list_with_separator l sep =
   prerr_string "]"
 
 (* let show_env_map (env_map : globalenv) = *)
-(*   Efficient_hashtbl.iter *)
+(*   Hashtbl.iter *)
 (*     (fun param loc_tagged_expr -> *)
 (*       prerr_string "Globalenv :\n param = "; *)
 (*       print_param param; *)
@@ -268,9 +268,9 @@ let show_pattern_with_separator set sep =
     set
 
 let show_var_se_tbl (var_to_se : var_se_tbl) =
-  Efficient_hashtbl.iter
+  Hashtbl.iter
     (fun _ tbl ->
-      Efficient_hashtbl.iter
+      Hashtbl.iter
         (fun x se ->
           prerr_string "var_to_se :\n ident = ";
           prerr_string (CL.Ident.unique_name x);
@@ -281,11 +281,10 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
         tbl)
     var_to_se
 
-let show_mem
-    (mem : (string, (loc, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t) =
-  Efficient_hashtbl.iter
+let show_mem (mem : (string, (loc, SESet.t) Hashtbl.t) Hashtbl.t) =
+  Hashtbl.iter
     (fun _ mem ->
-      Efficient_hashtbl.iter
+      Hashtbl.iter
         (fun (key, _) data ->
           if SESet.is_empty data then ()
           else (
@@ -297,12 +296,10 @@ let show_mem
         mem)
     mem
 
-let show_sc_tbl
-    (tbl :
-      (string, (value se, SESet.t) Efficient_hashtbl.t) Efficient_hashtbl.t) =
-  Efficient_hashtbl.iter
+let show_sc_tbl (tbl : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t) =
+  Hashtbl.iter
     (fun _ tbl ->
-      Efficient_hashtbl.iter
+      Hashtbl.iter
         (fun key data ->
           if SESet.is_empty data then ()
           else (
@@ -317,8 +314,8 @@ let show_sc_tbl
         tbl)
     tbl
 
-let show_grammar (g : (pattern se, GESet.t) Efficient_hashtbl.t) =
-  Efficient_hashtbl.iter
+let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
+  Hashtbl.iter
     (fun key data ->
       if GESet.is_empty data then ()
       else (
@@ -330,8 +327,8 @@ let show_grammar (g : (pattern se, GESet.t) Efficient_hashtbl.t) =
         prerr_newline ()))
     g
 
-let show_abs_mem (a : (loc, GESet.t) Efficient_hashtbl.t) =
-  Efficient_hashtbl.iter
+let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
+  Hashtbl.iter
     (fun (key, _) data ->
       if GESet.is_empty data then ()
       else (
@@ -343,8 +340,8 @@ let show_abs_mem (a : (loc, GESet.t) Efficient_hashtbl.t) =
         prerr_newline ()))
     a
 
-let show_exn_of_file (tbl : (string, value se list) Efficient_hashtbl.t) =
-  Efficient_hashtbl.iter
+let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
+  Hashtbl.iter
     (fun key data ->
       prerr_string "exceptions in file ";
       prerr_string key;
@@ -353,7 +350,7 @@ let show_exn_of_file (tbl : (string, value se list) Efficient_hashtbl.t) =
         (function
           | Var x ->
             let set =
-              try Efficient_hashtbl.find grammar (Var x) with _ -> GESet.empty
+              try Hashtbl.find grammar (Var x) with _ -> GESet.empty
             in
             if GESet.is_empty set then ()
             else (
@@ -368,9 +365,9 @@ let show_exn_of_file (tbl : (string, value se list) Efficient_hashtbl.t) =
 
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
-  Efficient_hashtbl.iter
+  Hashtbl.iter
     (fun _ tbl ->
-      Efficient_hashtbl.iter
+      Hashtbl.iter
         (fun key data ->
           let set =
             SESet.filter
@@ -393,9 +390,7 @@ let explain_abs_mem () =
   prerr_endline "where abstract locations contain:";
   LocSet.iter
     (fun (i, name) ->
-      let set =
-        try Efficient_hashtbl.find abs_mem (i, name) with _ -> GESet.empty
-      in
+      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
       prerr_string "\tlocation ";
       prerr_int i;
       prerr_newline ();
