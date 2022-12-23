@@ -57,7 +57,10 @@ let processCmtFiles ~cmtRoot =
         else if
           Filename.check_suffix absDir ".cmt"
           || Filename.check_suffix absDir ".cmti"
-        then absDir |> loadCmtFile
+        then
+          try absDir |> loadCmtFile
+          with _ ->
+            prerr_string ("Processing .cmt file at: " ^ absDir ^ " failed\n")
     in
     walkSubDirs ""
   | None ->
@@ -83,7 +86,10 @@ let processCmtFiles ~cmtRoot =
            cmtFiles |> List.sort String.compare
            |> List.iter (fun cmtFile ->
                   let cmtFilePath = Filename.concat libBsSourceDir cmtFile in
-                  cmtFilePath |> loadCmtFile))
+                  try cmtFilePath |> loadCmtFile
+                  with _ ->
+                    prerr_string
+                      ("Processing .cmt file at: " ^ cmtFilePath ^ " failed\n")))
 
 let runAnalysis ~cmtRoot ~ppf =
   Log_.Color.setup ();

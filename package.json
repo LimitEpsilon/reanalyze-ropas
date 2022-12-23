@@ -6,7 +6,7 @@
   "license": "MIT",
   "scripts": {
     "build": "dune build",
-    "build-dev": "cp src/dune src/dune.saved && cp src/dune.dev src/dune && echo '#define dev 1' >dev.h && npm run build && mv src/dune.saved src/dune && echo '#undef dev' >dev.h || mv src/dune.saved src/dune && echo '#undef dev' >dev.h",
+    "build-dev": "cp src/dune src/dune.saved && cp src/dune.dev src/dune && echo '#define npm 1' >config.h && echo '#define dev 1' >dev.h && npm run build && mv src/dune.saved src/dune && echo '#undef dev' >dev.h || mv src/dune.saved src/dune && echo '#undef npm' >config.h && echo '#undef dev' >dev.h",
     "build406": "echo '#define npm 1' >config.h && npm run build && echo '#undef npm' >config.h || echo '#undef npm' >config.h",
     "clean": "dune clean -p reanalyze",
     "test": "node ./scripts/run_integration_tests.js",

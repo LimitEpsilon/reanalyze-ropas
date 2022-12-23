@@ -1,3 +1,5 @@
+[%%import "../config.h"]
+
 let printPos ppf (pos : Lexing.position) =
   let file = pos.Lexing.pos_fname in
   let line = pos.Lexing.pos_lnum in
@@ -878,8 +880,11 @@ module Compile = struct
                 )
               ->
                 match recordLabelDefinition with
-                | (Kept _ [@if ocaml_version < (5, 0, 0)])-> None
-                | (Kept (_, _) [@if ocaml_version >= (5, 0, 0)]) -> None
+                | ((Kept _) [@if ocaml_version < (5, 0, 0) || defined npm]) ->
+                  None
+                | ((Kept (_, _))
+                [@if ocaml_version >= (5, 0, 0) && not_defined npm]) ->
+                  None
                 | Overridden (_loc, e) -> Some e))
       |> List.map (expressionOpt ~ctx)
       |> Command.unorderedSequence

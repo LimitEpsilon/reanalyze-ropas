@@ -2,7 +2,7 @@
 
 open CL
 
-[%%if ocaml_version >= (4, 08, 0) && not_defined npm]
+[%%if ocaml_version >= (4, 08, 0)]
 
 let getStringTag s = match s with Format.String_tag s -> s | _ -> ""
 
@@ -11,7 +11,7 @@ let getStringTag s = match s with Format.String_tag s -> s | _ -> ""
 let getStringTag s = s
 
 [%%endif]
-[%%if ocaml_version >= (4, 08, 0) && not_defined npm]
+[%%if ocaml_version >= (4, 08, 0)]
 
 let filter_map = List.filter_map
 
@@ -112,7 +112,7 @@ let unboxPatCstrTxt pat =
     txt
   | _ -> assert false
 
-[%%if ocaml_version >= (4, 08, 0) && not_defined npm]
+[%%if ocaml_version >= (4, 08, 0)]
 
 let setOpenCloseTag openTag closeTag =
   {
@@ -133,7 +133,7 @@ let setOpenCloseTag openTag closeTag =
   }
 
 [%%endif]
-[%%if ocaml_version >= (4, 08, 0) && not_defined npm]
+[%%if ocaml_version >= (4, 08, 0)]
 
 let pp_set_formatter_tag_functions = Format.pp_set_formatter_stag_functions
 
