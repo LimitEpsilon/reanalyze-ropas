@@ -241,16 +241,6 @@ and print_list_with_separator l sep =
   done;
   prerr_string "]"
 
-(* let show_env_map (env_map : globalenv) = *)
-(*   Hashtbl.iter *)
-(*     (fun param loc_tagged_expr -> *)
-(*       prerr_string "Globalenv :\n param = "; *)
-(*       print_param param; *)
-(*       prerr_string "\n code_loc tagged_expr = "; *)
-(*       print_tagged_expr loc_tagged_expr; *)
-(*       prerr_newline ()) *)
-(*     env_map *)
-
 let show_se_with_separator set sep =
   SESet.iter
     (fun x ->
@@ -340,24 +330,78 @@ let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
         prerr_newline ()))
     a
 
+let tracked_vars = Hashtbl.create 10
+
+exception Unexpected_se
+
+let rec track_exception (x : value se) (exn : pattern se) =
+  let propagate = function
+    | Var (Packet (Expr x)) ->
+      let exns =
+        try Hashtbl.find grammar (Var (Packet (Expr x))) with _ -> GESet.empty
+      in
+      if GESet.mem exn exns then (
+        try
+          SESet.iter
+            (function
+              | Var x -> track_exception (Var x) exn
+              | Diff (Var x, _) -> track_exception (Var x) exn
+              | _ -> ())
+            (lookup_sc (Var (Packet (Expr x))))
+        with Unexpected_se ->
+          prerr_string "  raised from: ";
+          print_loc x;
+          prerr_newline ())
+    | Var (Packet (Expr_var x)) ->
+      let exns =
+        try Hashtbl.find grammar (Var (Packet (Expr_var x)))
+        with _ -> GESet.empty
+      in
+      if GESet.mem exn exns then
+        SESet.iter
+          (function
+            | Var x -> track_exception (Var x) exn
+            | Diff (Var x, _) -> track_exception (Var x) exn
+            | _ -> ())
+          (try lookup_sc (Var (Packet (Expr_var x))) with _ -> SESet.empty)
+    | Var (Val (Expr x)) ->
+      prerr_string "  raised from: ";
+      print_loc x;
+      prerr_newline ()
+    | _ -> raise Unexpected_se
+  in
+  match Hashtbl.find tracked_vars x with
+  | exception Not_found ->
+    Hashtbl.add tracked_vars x ();
+    propagate x
+  | () -> ()
+
 let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      prerr_string "exceptions in file ";
+      prerr_string "Exceptions in file ";
       prerr_string key;
       prerr_newline ();
       List.iter
         (function
-          | Var x ->
+          | Var (Packet (Expr loc)) ->
             let set =
-              try Hashtbl.find grammar (Var x) with _ -> GESet.empty
+              try Hashtbl.find grammar (Var (Packet (Expr loc)))
+              with _ -> GESet.empty
             in
             if GESet.is_empty set then ()
             else (
-              prerr_string "\tfrom ";
-              print_tagged_expr x;
+              prerr_string " escaped from ";
+              print_loc loc;
               prerr_endline ":";
-              show_pattern_with_separator set "\t\t";
+              GESet.iter
+                (function
+                  | Ctor_pat (Some ctor, _) as exn ->
+                    prerr_string (" " ^ ctor ^ ":\n");
+                    Hashtbl.clear tracked_vars;
+                    track_exception (Var (Packet (Expr loc))) exn
+                  | _ -> ())
+                set;
               prerr_newline ())
           | _ -> ())
         data)
