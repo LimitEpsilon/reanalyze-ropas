@@ -79,6 +79,7 @@ and _ se =
   | Diff : value se * pattern se -> value se
   | Loc : loc * pattern se option -> pattern se
 
+module LocSet : Set.S with type elt = loc
 module StringSet : Set.S with type elt = string
 
 val current_module : string ref
@@ -110,9 +111,11 @@ val packet_of_expr : CL.Typedtree.expression -> value se
 val linking : bool ref
 val worklist : Worklist.t
 val sc : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t
+val reverse_sc : (int, SESet.t) Hashtbl.t
 val lookup_sc : value se -> SESet.t
 val update_sc : value se -> SESet.elt list -> unit
 val memory : (string, (loc, SESet.t) Hashtbl.t) Hashtbl.t
+val reverse_mem : (int, LocSet.t) Hashtbl.t
 val lookup_mem : loc -> SESet.t
 val update_mem : loc -> SESet.elt list -> unit
 

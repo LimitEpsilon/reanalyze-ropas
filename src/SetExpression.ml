@@ -110,7 +110,13 @@ and _ se =
 (* divide_by_zero : check denominator, if constant check if zero.
                   : if identifier look up in var_to_se to check if constant
                   : if constant check if zero, else mark might_raise *)
+module Loc = struct
+  type t = loc
 
+  let compare = compare
+end
+
+module LocSet = Set.Make (Loc)
 module StringSet = Set.Make (String)
 
 let current_module = ref ""
@@ -172,8 +178,9 @@ end
 
 let linking = ref false
 let worklist : Worklist.t = create 10
-let reverse_mem : (loc, Worklist.t) t = create 10
+let affected_vars : (loc, Worklist.t) t = create 10
 let sc : (string, (value se, SESet.t) t) t = create 10
+let reverse_sc : (int, SESet.t) t = create 10
 let hash = hash
 
 let update_worklist set =
@@ -184,6 +191,22 @@ let update_worklist set =
     | _ -> ()
   in
   SESet.iter summarize set
+
+exception Escape
+
+let update_reverse_sc key set =
+  let summarize elt =
+    let idx =
+      match elt with
+      | App_V (x, _) | App_P (x, _) | Fld (x, _) | Diff (x, _) -> hash x
+      | Var _ | Ctor _ -> hash elt
+      | _ -> raise Escape
+    in
+    match find reverse_sc idx with
+    | exception Not_found -> add reverse_sc idx (SESet.singleton key)
+    | orig -> replace reverse_sc idx (SESet.add key orig)
+  in
+  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set
 
 let get_context_fld = function
   | Fld
@@ -217,6 +240,7 @@ let update_sc key data =
   in
   let set = SESet.of_list data in
   update_worklist set;
+  update_reverse_sc key set;
   if mem sc key then
     let original = find sc key in
     replace sc key (SESet.union original set)
@@ -245,6 +269,21 @@ type to_be_resolved = (loc, CL.Path.t * string) t
 let to_be_resolved : to_be_resolved = create 256
 let update_to_be key data = add to_be_resolved key (data, !current_module)
 let memory : (string, (loc, SESet.t) t) t = create 10
+let reverse_mem : (int, LocSet.t) t = create 10
+
+let update_reverse_mem key set =
+  let summarize elt =
+    let idx =
+      match elt with
+      | App_V (x, _) | App_P (x, _) | Fld (x, _) | Diff (x, _) -> hash x
+      | Var _ | Ctor _ -> hash elt
+      | _ -> raise Escape
+    in
+    match find reverse_mem idx with
+    | exception Not_found -> add reverse_mem idx (LocSet.singleton key)
+    | orig -> replace reverse_mem idx (LocSet.add key orig)
+  in
+  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set
 
 let lookup_mem key =
   let _, context = key in
@@ -261,6 +300,7 @@ let update_mem key data =
     | tbl -> tbl
   in
   let set = SESet.of_list data in
+  update_reverse_mem key set;
   if mem memory key then
     let original = find memory key in
     replace memory key (SESet.union original set)
@@ -366,11 +406,11 @@ module GESet = Set.Make (GE)
 let update_worklist_g key set =
   let update_l = function
     | Loc (l, None) -> (
-      match find reverse_mem l with
+      match find affected_vars l with
       | exception Not_found ->
         let new_tbl = create 1 in
         add new_tbl (hash key) ();
-        add reverse_mem l new_tbl
+        add affected_vars l new_tbl
       | original -> Worklist.add (hash key) original)
     | _ -> ()
   in
@@ -397,16 +437,18 @@ let update_c key set =
         if SESet.mem Top diff then replace sc key (SESet.singleton Top)
         else replace sc key (SESet.union original diff);
         update_worklist (SESet.add key diff);
+        update_reverse_sc key diff;
         changed := true;
         true)
   else (
     add sc key set;
     update_worklist (SESet.add key set);
+    update_reverse_sc key set;
     changed := true;
     true)
 
-let consult_reverse_mem key =
-  match find reverse_mem key with
+let consult_affected_vars key =
+  match find affected_vars key with
   | exception Not_found -> ()
   | affected -> iter (fun x () -> Worklist.add x worklist) affected
 
@@ -423,13 +465,15 @@ let update_loc key set =
         if SESet.mem Top diff then replace memory key (SESet.singleton Top)
         else replace memory key (SESet.union original diff);
         update_worklist diff;
-        consult_reverse_mem key;
+        consult_affected_vars key;
+        update_reverse_mem key diff;
         changed := true;
         true)
   else (
     add memory key set;
     update_worklist set;
-    consult_reverse_mem key;
+    consult_affected_vars key;
+    update_reverse_mem key set;
     changed := true;
     true)
 
@@ -467,11 +511,11 @@ let update_abs_loc key set =
       else (
         if GESet.mem Top diff then replace abs_mem key (GESet.singleton Top)
         else replace abs_mem key (GESet.union original diff);
-        consult_reverse_mem key;
+        consult_affected_vars key;
         changed := true;
         true)
   else (
     add abs_mem key set;
-    consult_reverse_mem key;
+    consult_affected_vars key;
     changed := true;
     true)

@@ -419,25 +419,32 @@ let resolve_update (var, i) set =
       p_set
   | exception _ -> ()
 
-let step_sc_for_file tbl =
-  Hashtbl.iter
-    (fun x set ->
-      match x with
-      | Var var -> SESet.iter (resolve_var var) set
-      | Fld (Var var, (None, Some i)) ->
-        let t = Unix.gettimeofday () in
-        resolve_update (var, i) set;
-        time_spent_in_update :=
-          !time_spent_in_update +. (Unix.gettimeofday () -. t)
-      | _ -> ())
-    tbl
+let step_sc_for_entry x set =
+  match x with
+  | Var var -> SESet.iter (resolve_var var) set
+  | Fld (Var var, (None, Some i)) ->
+    let t = Unix.gettimeofday () in
+    resolve_update (var, i) set;
+    time_spent_in_update := !time_spent_in_update +. (Unix.gettimeofday () -. t)
+  | _ -> ()
+
+let step_sc_for_file tbl = Hashtbl.iter step_sc_for_entry tbl
 
 let step_sc added_file =
   if !linking then
-    StringSet.iter
-      (fun file ->
-        try step_sc_for_file (Hashtbl.find sc file) with Not_found -> ())
-      !files
+    let to_be_reduced =
+      Seq.fold_left
+        (fun acc (idx, ()) ->
+          SESet.union
+            (try Hashtbl.find reverse_sc idx with Not_found -> SESet.empty)
+            acc)
+        SESet.empty
+        (Hashtbl.to_seq prev_worklist)
+    in
+    SESet.iter
+      (fun x ->
+        step_sc_for_entry x (try lookup_sc x with Not_found -> SESet.empty))
+      to_be_reduced
   else try step_sc_for_file (Hashtbl.find sc added_file) with Not_found -> ()
 
 let resolve_mem loc elt =
@@ -647,10 +654,21 @@ let step_mem_for_file tbl =
 
 let step_mem added_file =
   if !linking then
-    StringSet.iter
-      (fun file ->
-        try step_mem_for_file (Hashtbl.find memory file) with Not_found -> ())
-      !files
+    let to_be_reduced =
+      Seq.fold_left
+        (fun acc (idx, ()) ->
+          SetExpression.LocSet.union
+            (try Hashtbl.find reverse_mem idx
+             with Not_found -> SetExpression.LocSet.empty)
+            acc)
+        SetExpression.LocSet.empty
+        (Hashtbl.to_seq prev_worklist)
+    in
+    SetExpression.LocSet.iter
+      (fun x ->
+        SESet.iter (resolve_mem x)
+          (try lookup_mem x with Not_found -> SESet.empty))
+      to_be_reduced
   else
     try step_mem_for_file (Hashtbl.find memory added_file)
     with Not_found -> ()

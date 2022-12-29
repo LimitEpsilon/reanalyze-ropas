@@ -1,0 +1,380 @@
+%! TEX program = xelatex
+\documentclass[a4paper]{article}
+
+\usepackage{graphicx}
+\usepackage{kotex}
+
+\usepackage{tabularray}
+\UseTblrLibrary{booktabs}
+\UseTblrLibrary{counter}
+
+\usepackage{listings}
+\lstdefinelanguage{JavaScript}{
+  keywords={typeof, new, true, false, catch, function, return, null, catch, switch, var, if, in, while, do, else, case, break},
+  keywordstyle=\bfseries,
+  ndkeywords={class, export, boolean, throw, implements, import, this},
+  ndkeywordstyle=\bfseries,
+  % identifierstyle=\color{black},
+  sensitive=false,
+  comment=[l]{//},
+  morecomment=[s]{/*}{*/},
+  commentstyle=\color{purple}\ttfamily,
+  stringstyle=\color{red}\ttfamily,
+  morestring=[b]',
+  morestring=[b]"
+}
+\lstset{
+  basicstyle=\ttfamily,
+  defaultdialect=[objective]Caml
+}
+
+% \usepackage{biblatex}
+% \addbibresource{citations.bib}
+
+%%% Math settings
+\usepackage{amssymb,amsmath,mathtools} % Before unicode-math
+\usepackage[math-style=TeX,bold-style=TeX]{unicode-math}
+% \newtheorem{clm}{Claim}[section]
+
+\newfontfamily{\fallbackfont}{EB Garamond}
+\DeclareTextFontCommand{\textfallback}{\fallbackfont}
+\usepackage{newunicodechar}
+\newunicodechar{⩴}{\textfallback{⩴}}
+
+%%% Font settings
+\setmainfont{Libertinus Serif}
+\setsansfont{Libertinus Sans}[Scale=MatchUppercase]
+\setmonofont{JuliaMono}[Scale=MatchLowercase]
+
+\setmathfont{Libertinus Math} % Before set*hangulfont
+\setmathfont{TeX Gyre Pagella Math}[range={\lbrace,\rbrace},Scale=1.1]
+
+\setmainhangulfont{Noto Serif CJK KR}[Scale=.885]
+\setmonohangulfont{D2Coding}[Scale=MatchLowercase]
+
+%%% PL constructs
+\usepackage{ebproof}
+\ebproofset{left label template=\textsc{[\inserttext]}}
+
+\usepackage{simplebnf}
+\RenewDocumentCommand\SimpleBNFDefEq{}{\ensuremath{⩴}}
+
+% because of simplebnf
+\newcommand*\vbar{|}
+\newcommand*{\finto}{\xrightarrow{\text{\textrm{fin}}}}
+\newcommand*{\istype}{\mathrel{⩴}}
+\newcommand*{\ortype}{\mathrel{|}}
+
+% for complement
+\newcommand{\loverbar}[1]{\mkern 1.5mu\overline{\mkern-1.5mu#1\mkern-1.5mu}\mkern 1.5mu}
+
+\newcommand*{\Reanalyze}{\textit{ReAnalyze}}
+
+\newcommand*{\Memory}{\mathit{Mem}}
+\newcommand*{\Loc}{\mathit{Loc}}
+\newcommand*{\Value}{\mathit{Val}}
+\newcommand*{\Env}{\mathit{Env}}
+\newcommand*{\Id}{\mathit{Id}}
+\newcommand*{\Closure}{\mathit{Closure}}
+\newcommand*{\Const}{\mathit{Const}}
+\newcommand*{\Exn}{\mathit{Exn}}
+\newcommand*{\Arr}{\mathit{Arr}}
+\newcommand*{\Lbl}{\mathit{Lbl}}
+\newcommand*{\List}{\mathit{List}}
+\newcommand*{\Expr}{\mathit{Expr}}
+\newcommand*{\Ctor}{\mathit{Ctor}}
+\newcommand*{\Packet}{\underline{\mathit{Lbl}}}
+\newcommand*{\Prim}{\mathit{Prim}}
+\newcommand*{\Op}{\mathit{Op}}
+
+\title{Semantics for Exception Evaluation}
+\author{서울대학교 전기$\cdot$정보공학부 이재호, 이준협}
+\date{\today}
+\begin{document}
+\maketitle
+
+\section{Semantic domains}
+\begin{equation*}
+  {\begin{tblr}{rclcll}
+    \sigma & \in & \Env & = & \Id \to \Value & \text{environment}\\
+    M & \in & \Memory & = & \Loc \to \Value & \text{memory}\\
+    v & \in & \Value & = & \Prim + \Closure + \Arr + \Lbl & \text{values}\\
+    \pi & \in & \Prim & = & \{+, -, \mathtt{raise}, \cdots\} & \text{primitive operators}\\
+    c & \in & \Const & = &  \mathbb{Z} + \mathbb{R} + \mathbb{B} + \cdots & \text{contants}\\
+    x & \in & \Id & = & \text{identifiers in $\wp$} & \text{identifiers} \\
+    f & \in & \Closure & = & \Expr \times \Env & \text{functions}\\
+    {[\ell_1; \dots; \ell_m]} & \in & \Arr & = & \Loc^* & \text{array-like data (arrays, records, modules, etc.)}\\
+    \kappa & \in & \Ctor & = & \text{$\kappa$ in $\wp$} & \text{constructors}\\
+    \langle\kappa, [\ell_1; \dots; \ell_m]\rangle & \in & \Lbl & = & \Ctor \times \Arr & \text{labeled data (variants, exns, etc.)}\\
+    \underline{\langle\kappa, [\ell_1; \dots; \ell_m]\rangle} & \in & \Packet & = & \Lbl & \text{raised exceptions}\\
+    \ell & \in & \Loc &&& \text{location}\\
+  \end{tblr}}
+\end{equation*}
+\begin{bnfgrammar}
+  $e$ : expression \in \Expr
+  ;;
+  $e$ ::=
+    $\pi$ : \textup{primitive operator}
+  | $c$ : \textup{constant}
+  | $x$ : \textup{id}
+  | $\kappa$ $e$ : \textup{labeled data}
+  | $\lambda$ $(p\ e)^+$ : \textup{function}
+  | $e$ $e$ : \textup{application}
+  | $[e^*]$ : \textup{array-like data}
+  ;;
+  $p$ : pattern ::=
+    $p_v$ : \textup{value pattern}
+  | $\underline{p_v}$ : \textup{``computation'' pattern}
+  ;;
+  $p_v$ : value pattern ::=
+    $\_$ : \textup{wildcard}
+  | $x$ : \textup{variable}
+  | $\kappa$ $p$ : \textup{labeled pattern}
+  | $[p^*]$ : \textup{array-like data}
+  | $c$ : \textup{constant}
+\end{bnfgrammar}
+
+\begin{gather*}
+\mathcal{E} \colon \underbrace{\Expr \to \Env \times \Memory \to (\Value + \Exn) \times \Memory}_D\\
+\mathcal{F} \colon D \to D \\
+\mathcal{E} = \operatorname{fix} \mathcal{F}\\
+\end{gather*}
+
+\subsection{One $\Arr$ to rule them all}
+\subsubsection{Custom record}
+\begin{minipage}[t]{0.5\textwidth}
+\begin{lstlisting}[language=Caml]
+type myty = {a: int, mutable b: int}
+let x = {a: 0, b: 0}
+let y = x
+y.b = 1
+// x.b & y.b both 1
+\end{lstlisting}
+\end{minipage}%
+\begin{minipage}[t]{0.5\textwidth}
+\begin{align*}
+  \sigma(\mathtt{x}) &= \ell_x\\
+  \sigma(\mathtt{y}) &= \ell_y\\
+  s(\ell_{\mathtt{x}}) &= [\ell_{\texttt{a}}, \ell_{\texttt{b}}]\\
+  s(\ell_{\mathtt{y}}) &= [\ell_{\texttt{a}}, \ell_{\texttt{b}}]\\
+  s(\ell_{\mathtt{a}}) &= 0\\
+  s(\ell_{\mathtt{b}}) &= 0 \leadsto 1\\
+\end{align*}
+\end{minipage}
+
+\subsubsection{Exception reference}
+\begin{center}
+\begin{minipage}[t]{0.5\textwidth}%
+\begin{lstlisting}[language=Caml]
+exception Exn1(int)
+exception Exn2
+let x = ref(Exn1 0)
+let y = x
+y := Exn2
+\end{lstlisting}%
+\end{minipage}%
+\begin{minipage}[t]{0.5\textwidth}
+\begin{align*}
+  \sigma(\mathtt{x}) &= \ell_x\\
+  \sigma(\mathtt{y}) &= \ell_y\\
+  s(\ell_{\mathtt{x}}) = s(\ell_{\mathtt{y}}) &= [\ell_{\mathtt{contents}}]\\
+  s(\ell_{\mathtt{contents}}) &= \langle\texttt{Exn1}, [\ell_\iota]\rangle \leadsto \langle\texttt{Exn2}, []\rangle\\
+  s(\ell_\iota) &= 0\\
+\end{align*}
+\end{minipage}
+\end{center}
+
+\subsubsection{Module}
+\begin{minipage}[t]{0.5\textwidth}
+\begin{lstlisting}[language=Caml]
+module type MySig = {
+  let a: int
+}
+module MyMod = {
+  let a = 0
+}
+module MyFun = (M: MySig) => {
+  let b = M.a + 1
+}
+module M = MyFun(MyMod)
+let {b: x} = module(M)
+\end{lstlisting}
+\end{minipage}%
+\begin{minipage}[t]{0.5\textwidth}
+\begin{align*}
+  \sigma(\mathtt{MyMod}) &= \ell_{\mathtt{MyMod}}\\
+  \sigma(\mathtt{M}) &= \ell_{\mathtt{M}}\\
+  \sigma(\mathtt{x}) &= \ell_{\mathtt{x}}\\
+  s(\ell_{\mathtt{MyMod}}) &= [\ell_{\mathtt{a}}]\\
+  s(\ell_{\mathtt{M}}) &= [\ell_{\mathtt{b}}]\\
+  s(\ell_{\mathtt{x}}) &= 1\\
+  s(\ell_{\mathtt{a}}) &= 0\\
+  s(\ell_{\mathtt{b}}) &= 1\\
+\end{align*}
+\end{minipage}
+
+\begin{lstlisting}[language=JavaScript]
+var MyMod = {a: 0};
+function MyFun(M) {
+  var b = M.a + 1 | 0;
+  return {b: b};
+}
+var b = 1;
+var M = {b: b};
+var x = b;
+\end{lstlisting}
+
+\section{$\mathcal{C}$ to $\mathcal{G}$}
+We first define the set expressions that represent sets of values an arbitrary expression can have. Note that the set expressions are divided into two kinds, one for propagating function applications and another for propagating filtered patterns.
+
+\begin{bnfgrammar}[rrcll]
+$v$: ``Value'' set expressions ::=
+   $\top$ : top
+  | $c$ : constant
+  | $\mathcal{X}$ : set variable
+  | $\pi$ : primitive operator
+  | $\lambda x.e$ : function
+  | $\pi_{v\vbar p}[(-\vbar\mathcal{X})^*]$ : primitive application
+  | $\mathsf{app}_{v\vbar p} (\mathcal{X}, [(-\vbar\mathcal{X})^*])$ : function application
+  | $\langle(-\vbar\kappa), [\ell^*]\rangle$ : variants, records, tuples, arrays
+  | $\mathsf{fld}(\mathcal{X}, (-\vbar\kappa), i)$ : field
+  | $\mathcal{X} - p$ : pattern filtering
+;;
+$p$: ``Pattern'' set expressions ::=
+    $\hat \top$ : top
+  | $\hat c$ : constant
+  | $\langle(-\vbar\kappa),[p^*]\rangle$ : variants, records, tuples, arrays
+  | $\hat \ell$ : location
+  | $\hat \ell \vbar_{p}$ : location constrained by $p$
+;;
+\end{bnfgrammar}
+
+Next the structure of possible set constraints are illustrated. The constraints collect what each set variable will contain, what each update will do, and what each location will contain.
+\RenewDocumentCommand\SimpleBNFDefEq{}{\ensuremath{\supseteq}}
+\begin{bnfgrammar}[rrcll]
+  $\mathcal{X}$: Constraints $\mathcal{C}$ ::= $v$ : set variables
+;;
+  $\mathsf{fld}(\mathcal{X}, -, i)$ ::= $v$ : updates
+;;
+  $!\ell$ ::= $v$ : variant, record, tuple, array elements
+;;
+  $\mathcal{\hat X}$: Grammar $\mathcal{G}$ ::= $p$ : set variables
+;;
+  $!\hat\ell$ ::= $p$ : variant, record, tuple, array elements
+;;
+  \end{bnfgrammar}
+\RenewDocumentCommand\SimpleBNFDefEq{}{\ensuremath{⩴}}
+
+Note that $\langle\_,[\ell^*]\rangle$ is used to represent the \textit{Arr} datatype in section 1.
+
+We need to find the least fixpoint $\operatorname{\mathsf{lfp}}(\lambda (C,G).\mathcal{F}(\mathcal{C}\cup C,G)) \eqcolon (\mathcal{C'},\mathcal G)$. $\mathcal{F}(C,G)$ takes a set of constraints $C$ and a grammar $G$ and performs ``one step of resolution'' to return a partially-resolved $(C',G')$. $\mathcal{C}$ is the initial set of constraints obtained from the program.
+
+What we want is a good definition of $\mathcal{F}$ so that $(C,G)\sqsubseteq\mathcal{F}(C,G)$ and $\mathcal{F}^\infty(C,G)$ converges surely while safely approximating all possible values. $\bot_C$ and $\bot_G$ is defined as the constraint/grammar only having the production to $\bot$(representing an empty set). Note that a production in $G$ specifies some pattern that $\mathcal{X}$ and $!\hat\ell$ might match.
+
+\subsection{Definition of $\mathcal{F}$}
+$\mathcal{F}(C,G)$: Look at the ``productions'' in $C$, determine what can be added to $C$ and $G$.
+
+Preliminaries:
+$$\mathsf{len}(l)\coloneq\begin{cases}
+0 & (l=[])\\
+\mathsf{len}(\mathsf{tl}(l)) & (\mathsf{hd}(l)=\_)\\
+\mathsf{len}(\mathsf{tl}(l)) + 1 & (\mathsf{hd}(l)\neq\_)
+\end{cases}$$
+
+$$\mathsf{merge}(l,l')\coloneq\begin{cases}
+l' & (l=[])\\
+l & (l'=[])\\
+\mathsf{hd}(l')::\mathsf{merge}(\mathsf{tl}(l),\mathsf{tl}(l')) & (\mathsf{hd}(l)=\_)\\
+\mathsf{hd}(l)::\mathsf{merge}(\mathsf{tl}(l),l') & (\mathsf{hd}(l)\neq\_)
+\end{cases}$$
+
+That is, $\mathsf{merge}(l,l')$ is performed by plugging in elements of $l'$ one by one into the $\_$ places of $l$(including $\_\in l'$), then concatenating the rest of $l'$ to the tail side of $l$ if there is no more free space.
+
+%% C에서는 lambda가 propagate
+%% G에서는 pattern이 propagate
+Now, let's define $\mathcal{F}$:
+
+\begin{enumerate}
+    \item For productions $\mathcal{X}\vbar!\ell\supseteq\top\:\vbar\: c\:\vbar\:\vbar\:\langle(\_\vbar\kappa),[\ell^*]\rangle$, add the same productions ``with a hat'' to $G$ if they are not already in $G$.
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathcal{X_1}$,
+    \begin{enumerate}
+        \item If $\hat{\mathcal{X_1}}\supseteq\bigstar$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\bigstar$ to $G$.
+        \item If $\mathcal{X}_1\supseteq \pi\:\vbar\:\lambda x.e\:\vbar\:\mathsf{app}_v(\mathcal{X}_2,\_::\mathtt{tl})\:\vbar\:\pi_v\:\mathtt{l}$ is in $C$, add those to $\mathcal{X}\vbar!\ell$ in $C$.
+    \end{enumerate}
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\pi_v\:\mathtt{l}$, when $\mathsf{len}(\mathtt{l})=\mathsf{arity}(\pi)$ and $\pi$ is not \texttt{raise}, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$ (constant propagation may be added). Note that \texttt{ignore}, \texttt{identity}, \texttt{reverse} must also be put into consideration, but this is trivial.
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\pi_p\:\mathtt{l}$, when $\mathsf{len}(\mathtt{l})=\mathsf{arity}(\pi)$ and $\pi$ is \texttt{raise}, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\mathsf{hd}(\mathtt{l})$ to $G$.
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X_1},[])$, this only happens on a \texttt{Lazy.force}, so if $\mathcal{X_1}\supseteq\lambda.e$ is in $C$, then add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\mathcal{X}(e)$ to $G$.
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X_1},[])$, this only happens on a \texttt{Lazy.force}, so if $\mathcal{X_1}\supseteq\lambda.e$ is in $C$, then add $\hat{\mathcal{X}}\supseteq\mathcal{X}\vbar!\hat{\ell}(\underline{e})$ to $G$.
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X_1},\mathcal{X_2} :: \mathtt{tl})$,
+    \begin{enumerate}
+        \item If $\mathcal{X_1}\supseteq\pi$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\pi_v\:\mathcal{X_2}::\mathtt{tl}$ to $C$.
+        \item If $\mathcal{X_1}\supseteq\pi_v\:\mathtt{l}$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\pi_v\:\mathsf{merge}(\mathtt{l},\mathcal{X_2}::\mathtt{tl})$ to $C$.
+        \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, $\mathtt{tl}\neq[]$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X}(e),\mathtt{tl})$, $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
+        \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, $\mathtt{tl}=[]$, add $\mathcal{X}\vbar!\ell\supseteq \mathcal{X}(e)$, $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
+        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,\_::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
+    \end{enumerate}
+    % Work in progress
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}_1,\mathcal{X}_2::\mathtt{tl})$,
+    \begin{enumerate}
+        \item If $\mathcal{X_1}\supseteq\pi$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\pi_p\:\mathcal{X_2}::\mathtt{tl}$ to $C$.
+        \item If $\mathcal{X_1}\supseteq\pi_v\:\mathtt{l}$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\pi_p\:\mathsf{merge}(\mathtt{l},\mathcal{X_2}::\mathtt{tl})$ to $C$.
+        % \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, $\mathtt{tl}\neq[]$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}(e),\mathtt{tl})$, $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
+        \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq \mathcal{X}(\underline{e})$,
+        $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
+        Additionally, if $\texttt{tl} \ne []$ then also add $\mathsf{app}_p(\mathcal{X}(e),\mathtt{tl})$.
+        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,\_::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
+    \end{enumerate}
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,\_,i)$,
+    \begin{enumerate}
+        \item If $\hat{\mathcal{X}_1}\supseteq\top$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
+    \end{enumerate}    
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,\kappa,i)$,
+    \begin{enumerate}
+        \item If $\hat{\mathcal{X}_1}\supseteq\top$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$. The constructor $\kappa$ must be matched.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
+    \end{enumerate}
+    \item For production $\mathsf{fld}(\mathcal{X}, \_, i)\supseteq\mathsf{something}$,
+    \begin{enumerate}
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...\hat\ell_i...\rangle$ is in $G$, add $!\ell_i\supseteq\text{something}$ to $C$.
+    \end{enumerate}
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathcal{X}_1-p$, first define
+    \[
+    \mathsf{filter}(x, p)\coloneq\begin{cases}
+    \varnothing & (p=\top)\\
+    \varnothing & (x=p)\\
+    \{x\} & (x\neq p,p=c)\\
+    \{x\} & (x=\langle\kappa,\_\rangle,p=\langle\kappa',\_\rangle)\\
+    \mathsf{filter}(\langle\_,[\underbrace{\top;...;\top}_{n\text{ times}}]\rangle,p) & (x=\top,p=\langle\_,[p_1;...;p_n]\rangle)\\
+    {\displaystyle\bigcup_{\hat{x}\supseteq y\in G}{\mathsf{filter}(y,p)}} & ((x,\hat{x})=(\hat{\mathcal{X}},\hat{\mathcal{X}})\text{ or }(\hat{\ell},!\hat{\ell}))\\
+    {\displaystyle\bigcup_{i = 0}^{n - 1}\left\langle\kappa,\left(\prod_{j = 1}^{i}{p_j}\right)\mathsf{filter}(x_{i + 1}, p_{i + 1})\left(\prod_{j = i + 2}^{n}x_j\right)\right\rangle} & (\underbrace{x=\langle\kappa,[x_1;...;x_n]\rangle,p=\langle\kappa,[p_1;...;p_n]\rangle}_{\kappa\text{ may be }\_})
+    \end{cases}
+    \] when $x\in\{p,\hat{\ell},\hat{\mathcal{X}}\}$
+    
+    Note that $\top$ happens on a $\pi_v$, and the type of $p$ must match with the type of $x$, so we can reconstruct the type of $\top$ from $p$ (when we use externals that return records). Also, in the list concatenation part of the last case, if the result of $\mathsf{filter}$ is $\varnothing$, the whole thing is $\varnothing$.
+    
+    Now, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\alpha$ for all $\alpha\in\mathsf{filter}(\hat{\mathcal{X}}_1,p)$ to $G$.
+\end{enumerate}
+
+\subsection{\texttt{Array.make} (resolution of $\pi$: maybe later)}
+For primitives $\pi$, a new constructor is generated, e.g., $\mathsf{app}_v(\pi, [])$ to $\mathsf{ctor}(\_, [\ell_{\text{new}}])$.
+
+\subsection{Brainstorming}
+\begin{align*}
+    \langle\kappa, \ell_1 \ell_2 ... \ell_n\rangle - \langle\kappa, p_1 p_2 ... p_n\rangle &= \langle \kappa, (\ell_1 - p_1)\ell_2 ... \ell_n\rangle\\
+    &\quad+ \langle\kappa, p_1 (\ell_2 ... \ell_n - p_2 ... p_n)\rangle\\
+    &= ...\\
+    &= \sum_{i = 0}^{n - 1}\left(\prod_{j = 1}^{i}{p_j}\right)(\ell_{i + 1} - p_{i + 1})\left(\prod_{j = i + 2}^{n}\ell_j\right)\\
+    \ell - p &= !{\hat \ell} - p
+\end{align*}
+
+Here, the product notation stands for list concatenation, when $p_i$ and $\ell_i$ stands for a single-element list. $\ell-p$ stands for the contents of the abstract location $\ell$ that is not matched by the pattern $p$ : how to express this neatly?
+\end{document}
+%%% Local Variables: 
+%%% coding: utf-8
+%%% mode: latex
+%%% TeX-engine: xetex
+%%% End:
+
