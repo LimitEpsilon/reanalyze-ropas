@@ -23,11 +23,7 @@ and _ expr =
   | Expr : loc -> loc expr
 
 and arr = Static of loc list | Dynamic of loc
-
-and _ tagged_expr =
-  | Val : 'a expr -> 'a tagged_expr
-  | Packet : 'a expr -> 'a tagged_expr
-
+and tagged_expr = Val : _ expr -> tagged_expr | Packet : _ expr -> tagged_expr
 and ctor = string option
 and fld = ctor * int option
 
@@ -68,7 +64,7 @@ and _ se =
   | Const : CL.Asttypes.constant -> _ se
   | Prim : CL.Primitive.description -> value se
   | Fn : param * loc expr list -> value se
-  | Var : _ tagged_expr -> _ se
+  | Var : tagged_expr -> _ se
   | App_V : value se * arg -> value se
   | App_P : value se * arg -> value se
   | Ctor : ctor * arr -> value se
@@ -141,6 +137,6 @@ val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> bool
 val update_loc : loc -> SESet.t -> bool
 val grammar : (pattern se, GESet.t) Hashtbl.t
-val update_g : 'a tagged_expr -> GESet.t -> bool
+val update_g : tagged_expr -> GESet.t -> bool
 val abs_mem : (loc, GESet.t) Hashtbl.t
 val update_abs_loc : loc -> GESet.t -> bool

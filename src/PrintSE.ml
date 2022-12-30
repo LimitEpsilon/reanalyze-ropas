@@ -64,7 +64,7 @@ let print_expr : type k. k expr -> unit = function
     print_loc loc;
     prerr_string ")"
 
-let print_tagged_expr : type k. k tagged_expr -> unit = function
+let print_tagged_expr : tagged_expr -> unit = function
   | Val v ->
     prerr_string "Val (";
     print_expr v;
