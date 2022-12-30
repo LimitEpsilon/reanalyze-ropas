@@ -73,7 +73,6 @@ let process_structure (structure : Typedtree.structure) =
 let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   let id = Ident.create_persistent cmt_infos.cmt_modname in
   let () = current_module := cmt_infos.cmt_modname in
-  let () = files := StringSet.add !current_module !files in
   let filename =
     match cmt_infos.cmt_sourcefile with None -> "" | Some s -> s
   in

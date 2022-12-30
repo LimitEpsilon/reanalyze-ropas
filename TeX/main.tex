@@ -246,7 +246,6 @@ $p$: ``Pattern'' set expressions ::=
   | $\langle(-\vbar\kappa),[p^*]\rangle$ : variants, records, tuples, arrays
   | $\hat \ell$ : location
   | $\hat \ell \vbar_{p}$ : location constrained by $p$
-;;
 \end{bnfgrammar}
 
 Next the structure of possible set constraints are illustrated. The constraints collect what each set variable will contain, what each update will do, and what each location will contain.
@@ -261,15 +260,14 @@ Next the structure of possible set constraints are illustrated. The constraints 
   $\mathcal{\hat X}$: Grammar $\mathcal{G}$ ::= $p$ : set variables
 ;;
   $!\hat\ell$ ::= $p$ : variant, record, tuple, array elements
-;;
-  \end{bnfgrammar}
+\end{bnfgrammar}
 \RenewDocumentCommand\SimpleBNFDefEq{}{\ensuremath{⩴}}
 
-Note that $\langle\_,[\ell^*]\rangle$ is used to represent the \textit{Arr} datatype in section 1.
+Note that $\langle -,[\ell^*]\rangle$ is used to represent the \textit{Arr} datatype in section 1.
 
 We need to find the least fixpoint $\operatorname{\mathsf{lfp}}(\lambda (C,G).\mathcal{F}(\mathcal{C}\cup C,G)) \eqcolon (\mathcal{C'},\mathcal G)$. $\mathcal{F}(C,G)$ takes a set of constraints $C$ and a grammar $G$ and performs ``one step of resolution'' to return a partially-resolved $(C',G')$. $\mathcal{C}$ is the initial set of constraints obtained from the program.
 
-What we want is a good definition of $\mathcal{F}$ so that $(C,G)\sqsubseteq\mathcal{F}(C,G)$ and $\mathcal{F}^\infty(C,G)$ converges surely while safely approximating all possible values. $\bot_C$ and $\bot_G$ is defined as the constraint/grammar only having the production to $\bot$(representing an empty set). Note that a production in $G$ specifies some pattern that $\mathcal{X}$ and $!\hat\ell$ might match.
+What we want is a good definition of $\mathcal{F}$ so that $(C,G)\sqsubseteq\mathcal{F}(C,G)$ and $\mathcal{F}^\infty(C,G)$ converges surely while safely approximating all possible values. $\bot_C$ and $\bot_G$ is defined as the empty constraint/grammar. Note that a production in $G$ specifies some pattern that $\hat {\mathcal{X}}$ and $!\hat\ell$ might match.
 
 \subsection{Definition of $\mathcal{F}$}
 $\mathcal{F}(C,G)$: Look at the ``productions'' in $C$, determine what can be added to $C$ and $G$.
@@ -277,29 +275,29 @@ $\mathcal{F}(C,G)$: Look at the ``productions'' in $C$, determine what can be ad
 Preliminaries:
 $$\mathsf{len}(l)\coloneq\begin{cases}
 0 & (l=[])\\
-\mathsf{len}(\mathsf{tl}(l)) & (\mathsf{hd}(l)=\_)\\
-\mathsf{len}(\mathsf{tl}(l)) + 1 & (\mathsf{hd}(l)\neq\_)
+\mathsf{len}(\mathsf{tl}(l)) & (\mathsf{hd}(l)=-)\\
+\mathsf{len}(\mathsf{tl}(l)) + 1 & (\mathsf{hd}(l)\neq-)
 \end{cases}$$
 
 $$\mathsf{merge}(l,l')\coloneq\begin{cases}
 l' & (l=[])\\
 l & (l'=[])\\
-\mathsf{hd}(l')::\mathsf{merge}(\mathsf{tl}(l),\mathsf{tl}(l')) & (\mathsf{hd}(l)=\_)\\
-\mathsf{hd}(l)::\mathsf{merge}(\mathsf{tl}(l),l') & (\mathsf{hd}(l)\neq\_)
+\mathsf{hd}(l')::\mathsf{merge}(\mathsf{tl}(l),\mathsf{tl}(l')) & (\mathsf{hd}(l)=-)\\
+\mathsf{hd}(l)::\mathsf{merge}(\mathsf{tl}(l),l') & (\mathsf{hd}(l)\neq-)
 \end{cases}$$
 
-That is, $\mathsf{merge}(l,l')$ is performed by plugging in elements of $l'$ one by one into the $\_$ places of $l$(including $\_\in l'$), then concatenating the rest of $l'$ to the tail side of $l$ if there is no more free space.
+That is, $\mathsf{merge}(l,l')$ is performed by plugging in elements of $l'$ one by one into the $-$ places of $l$(including $-\in l'$), then concatenating the rest of $l'$ to the tail side of $l$ if there is no more free space.
 
 %% C에서는 lambda가 propagate
 %% G에서는 pattern이 propagate
 Now, let's define $\mathcal{F}$:
 
 \begin{enumerate}
-    \item For productions $\mathcal{X}\vbar!\ell\supseteq\top\:\vbar\: c\:\vbar\:\vbar\:\langle(\_\vbar\kappa),[\ell^*]\rangle$, add the same productions ``with a hat'' to $G$ if they are not already in $G$.
+    \item For productions $\mathcal{X}\vbar!\ell\supseteq\top\:\vbar\: c\:\vbar\:\vbar\:\langle(-\vbar\kappa),[\ell^*]\rangle$, add the same productions ``with a hat'' to $G$ if they are not already in $G$.
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathcal{X_1}$,
     \begin{enumerate}
         \item If $\hat{\mathcal{X_1}}\supseteq\bigstar$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\bigstar$ to $G$.
-        \item If $\mathcal{X}_1\supseteq \pi\:\vbar\:\lambda x.e\:\vbar\:\mathsf{app}_v(\mathcal{X}_2,\_::\mathtt{tl})\:\vbar\:\pi_v\:\mathtt{l}$ is in $C$, add those to $\mathcal{X}\vbar!\ell$ in $C$.
+        \item If $\mathcal{X}_1\supseteq \pi\:\vbar\:\lambda x.e\:\vbar\:\mathsf{app}_v(\mathcal{X}_2,-::\mathtt{tl})\:\vbar\:\pi_v\:\mathtt{l}$ is in $C$, add those to $\mathcal{X}\vbar!\ell$ in $C$.
     \end{enumerate}
     \item For production $\mathcal{X}\vbar!\ell\supseteq\pi_v\:\mathtt{l}$, when $\mathsf{len}(\mathtt{l})=\mathsf{arity}(\pi)$ and $\pi$ is not \texttt{raise}, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$ (constant propagation may be added). Note that \texttt{ignore}, \texttt{identity}, \texttt{reverse} must also be put into consideration, but this is trivial.
     \item For production $\mathcal{X}\vbar!\ell\supseteq\pi_p\:\mathtt{l}$, when $\mathsf{len}(\mathtt{l})=\mathsf{arity}(\pi)$ and $\pi$ is \texttt{raise}, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\mathsf{hd}(\mathtt{l})$ to $G$.
@@ -311,7 +309,7 @@ Now, let's define $\mathcal{F}$:
         \item If $\mathcal{X_1}\supseteq\pi_v\:\mathtt{l}$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\pi_v\:\mathsf{merge}(\mathtt{l},\mathcal{X_2}::\mathtt{tl})$ to $C$.
         \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, $\mathtt{tl}\neq[]$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X}(e),\mathtt{tl})$, $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
         \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, $\mathtt{tl}=[]$, add $\mathcal{X}\vbar!\ell\supseteq \mathcal{X}(e)$, $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
-        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,\_::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
+        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,-::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_v(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
     \end{enumerate}
     % Work in progress
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}_1,\mathcal{X}_2::\mathtt{tl})$,
@@ -322,13 +320,13 @@ Now, let's define $\mathcal{F}$:
         \item If $\mathcal{X_1}\supseteq \lambda x.e$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq \mathcal{X}(\underline{e})$,
         $\mathcal{X}(E_x)\supseteq\mathcal{X_1}$ to $C$.
         Additionally, if $\texttt{tl} \ne []$ then also add $\mathsf{app}_p(\mathcal{X}(e),\mathtt{tl})$.
-        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,\_::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
+        \item If $\mathcal{X_1}\supseteq\mathsf{app}_v(\mathcal{X}_3,-::\mathtt{tl}')$ is in $C$, add $\mathcal{X}\vbar!\ell\supseteq\mathsf{app}_p(\mathcal{X}_3,\mathcal{X_2}::\mathsf{merge}(\mathtt{tl},\mathtt{tl}'))$ to $C$.
     \end{enumerate}
-    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,\_,i)$,
+    \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,-,i)$,
     \begin{enumerate}
         \item If $\hat{\mathcal{X}_1}\supseteq\top$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$.
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$.
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
     \end{enumerate}    
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,\kappa,i)$,
     \begin{enumerate}
@@ -336,9 +334,9 @@ Now, let's define $\mathcal{F}$:
         \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$. The constructor $\kappa$ must be matched.
         \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
     \end{enumerate}
-    \item For production $\mathsf{fld}(\mathcal{X}, \_, i)\supseteq\mathsf{something}$,
+    \item For production $\mathsf{fld}(\mathcal{X}, -, i)\supseteq\mathsf{something}$,
     \begin{enumerate}
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle(\_\vbar\kappa),...\hat\ell_i...\rangle$ is in $G$, add $!\ell_i\supseteq\text{something}$ to $C$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat\ell_i...\rangle$ is in $G$, add $!\ell_i\supseteq\text{something}$ to $C$.
     \end{enumerate}
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathcal{X}_1-p$, first define
     \[
@@ -346,10 +344,10 @@ Now, let's define $\mathcal{F}$:
     \varnothing & (p=\top)\\
     \varnothing & (x=p)\\
     \{x\} & (x\neq p,p=c)\\
-    \{x\} & (x=\langle\kappa,\_\rangle,p=\langle\kappa',\_\rangle)\\
-    \mathsf{filter}(\langle\_,[\underbrace{\top;...;\top}_{n\text{ times}}]\rangle,p) & (x=\top,p=\langle\_,[p_1;...;p_n]\rangle)\\
+    \{x\} & (x=\langle\kappa,-\rangle,p=\langle\kappa',-\rangle)\\
+    \mathsf{filter}(\langle-,[\underbrace{\top;...;\top}_{n\text{ times}}]\rangle,p) & (x=\top,p=\langle-,[p_1;...;p_n]\rangle)\\
     {\displaystyle\bigcup_{\hat{x}\supseteq y\in G}{\mathsf{filter}(y,p)}} & ((x,\hat{x})=(\hat{\mathcal{X}},\hat{\mathcal{X}})\text{ or }(\hat{\ell},!\hat{\ell}))\\
-    {\displaystyle\bigcup_{i = 0}^{n - 1}\left\langle\kappa,\left(\prod_{j = 1}^{i}{p_j}\right)\mathsf{filter}(x_{i + 1}, p_{i + 1})\left(\prod_{j = i + 2}^{n}x_j\right)\right\rangle} & (\underbrace{x=\langle\kappa,[x_1;...;x_n]\rangle,p=\langle\kappa,[p_1;...;p_n]\rangle}_{\kappa\text{ may be }\_})
+    {\displaystyle\bigcup_{i = 0}^{n - 1}\left\langle\kappa,\left(\prod_{j = 1}^{i}{p_j}\right)\mathsf{filter}(x_{i + 1}, p_{i + 1})\left(\prod_{j = i + 2}^{n}x_j\right)\right\rangle} & (\underbrace{x=\langle\kappa,[x_1;...;x_n]\rangle,p=\langle\kappa,[p_1;...;p_n]\rangle}_{\kappa\text{ may be }-})
     \end{cases}
     \] when $x\in\{p,\hat{\ell},\hat{\mathcal{X}}\}$
     
@@ -359,7 +357,7 @@ Now, let's define $\mathcal{F}$:
 \end{enumerate}
 
 \subsection{\texttt{Array.make} (resolution of $\pi$: maybe later)}
-For primitives $\pi$, a new constructor is generated, e.g., $\mathsf{app}_v(\pi, [])$ to $\mathsf{ctor}(\_, [\ell_{\text{new}}])$.
+For primitives $\pi$, a new constructor is generated, e.g., $\mathsf{app}_v(\pi, [])$ to $\mathsf{ctor}(-, [\ell_{\text{new}}])$.
 
 \subsection{Brainstorming}
 \begin{align*}

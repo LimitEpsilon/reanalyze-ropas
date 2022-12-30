@@ -80,10 +80,8 @@ and _ se =
   | Loc : loc * pattern se option -> pattern se
 
 module LocSet : Set.S with type elt = loc
-module StringSet : Set.S with type elt = string
 
 val current_module : string ref
-val files : StringSet.t ref
 val new_memory : string -> loc
 val new_temp_var : string -> param expr
 val hash : 'a -> int

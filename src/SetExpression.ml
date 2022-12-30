@@ -117,10 +117,8 @@ module Loc = struct
 end
 
 module LocSet = Set.Make (Loc)
-module StringSet = Set.Make (String)
 
 let current_module = ref ""
-let files = ref StringSet.empty
 let temp_variable_label : (string, int) t = create 10
 
 let new_temp_var mod_name =

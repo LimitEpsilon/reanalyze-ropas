@@ -513,29 +513,36 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     ([], [Ctor (Some "Assert_failure", Static []); packet_of_expr exp])
   | Texp_lazy exp -> ([Fn (None, [expr_of_expr exp])], [])
   | Texp_pack m -> ([val_of_mod m], [packet_of_mod m])
-  | ((Texp_letop {let_; ands; body})
+  | ((Texp_letop {let_; ands; param; body})
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let let_path = let_.bop_op_path in
-    let letop = Var (Val (Expr (loc_of_summary (Bop_loc let_.bop_op_val)))) in
+    let let_loc = loc_of_summary (Bop_loc let_.bop_op_val) in
+    let letop = Var (Val (Expr let_loc)) in
     let bound = (val_of_expr let_.bop_exp, [packet_of_expr let_.bop_exp]) in
-    let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
-      let and_path = andop.bop_op_path in
-      let and_val =
-        Var (Val (Expr (loc_of_summary (Bop_loc andop.bop_op_val))))
-      in
-      let bound_val = val_of_expr andop.bop_exp in
-      let exn = packet_of_expr andop.bop_exp in
-      let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
-      update_to_be (loc_of_summary (Bop_loc andop.bop_op_val)) and_path;
-      (updated_val, exn :: acc_exn_list)
+    let for_each_and (acc_val, acc_exn_list) (and_ : CL.Typedtree.binding_op) =
+      let and_path = and_.bop_op_path in
+      let and_loc = loc_of_summary (Bop_loc and_.bop_op_val) in
+      let andop = Var (Val (Expr and_loc)) in
+      let bound_val = val_of_expr and_.bop_exp in
+      let exn = packet_of_expr and_.bop_exp in
+      let exn_app = App_P (andop, [Some acc_val; Some bound_val]) in
+      let temp = new_temp_var !current_module in
+      let updated_val = App_V (andop, [Some acc_val; Some bound_val]) in
+      update_sc (Var (Val temp)) [updated_val];
+      update_to_be and_loc and_path;
+      (Var (Val temp), exn_app :: exn :: acc_exn_list)
     in
     let bound_expr, exns = List.fold_left for_each_and bound ands in
-    let (Expr_var temp) = new_temp_var !current_module in
+    let temp = (param, !current_module) in
     let body_fn = Fn (Some temp, [expr_of_expr body.c_rhs]) in
-    let value = App_V (letop, [Some bound_expr; Some body_fn]) in
-    let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
+    let temp_fn = Var (Val (new_temp_var !current_module)) in
+    let value =
+      update_sc temp_fn [body_fn];
+      App_V (letop, [Some bound_expr; Some temp_fn])
+    in
+    let exn = App_P (letop, [Some bound_expr; Some temp_fn]) in
     solve_eq body.c_lhs (Var (Val (Expr_var temp))) |> ignore;
-    update_to_be (loc_of_summary (Bop_loc let_.bop_op_val)) let_path;
+    update_to_be let_loc let_path;
     ([value], exn :: exns)
   | ((Texp_open (_, exp)) [@if ocaml_version >= (4, 08, 0) && not_defined npm])
     ->
