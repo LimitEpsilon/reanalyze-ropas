@@ -349,12 +349,21 @@ let rec track_exception (x : value se) (exn : pattern se) =
         | Val (Expr e) ->
           prerr_string "  raised from: ";
           print_loc e;
-          prerr_newline ()
+          prerr_newline ();
+          if exn = Top then
+            SESet.iter
+              (function
+                | Var x -> track_exception (Var x) exn
+                | Diff (Var x, _) -> track_exception (Var x) exn
+                | Fld (Var x, _) -> track_exception (Var x) exn
+                | _ -> ())
+              (lookup_sc (Var (Val (Expr e))))
         | _ ->
           SESet.iter
             (function
               | Var x -> track_exception (Var x) exn
               | Diff (Var x, _) -> track_exception (Var x) exn
+              | Fld (Var x, _) when exn = Top -> track_exception (Var x) exn
               | _ -> ())
             (lookup_sc (Var x)))
     | _ -> assert false
