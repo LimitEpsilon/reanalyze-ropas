@@ -178,8 +178,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     failwith s
   in
   (* solves p = se and returns the set expression for p *)
-  let rec solve_eq (p : CL.Typedtree.pattern) e =
-    let se = Var e in
+  let rec solve_eq (p : CL.Typedtree.pattern) (se : value se) : pattern se list
+      =
     match p.pat_desc with
     | Tpat_any -> [Top]
     | Tpat_var (x, _) ->
@@ -187,15 +187,15 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       [Top]
     | Tpat_alias (p, a, _) ->
       update_var a [se];
-      solve_eq p e
+      solve_eq p se
     | Tpat_constant c -> [Const c]
-    | Tpat_tuple list -> solve_ctor None e list
+    | Tpat_tuple list -> solve_ctor None se list
     | ((Tpat_construct (_, {cstr_name}, list, _))
     [@if ocaml_version >= (4, 13, 0) && not_defined npm]) ->
-      solve_ctor (Some cstr_name) e list
+      solve_ctor (Some cstr_name) se list
     | ((Tpat_construct (_, {cstr_name}, list))
     [@if ocaml_version < (4, 13, 0) || defined npm]) ->
-      solve_ctor (Some cstr_name) e list
+      solve_ctor (Some cstr_name) se list
     | Tpat_variant (lbl, p_o, _) -> (
       let constructor = Some lbl in
       match p_o with
@@ -203,8 +203,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
         [Ctor_pat (constructor, [])]
         (* give up on being consistent with the actual mem repr *)
       | Some p ->
-        let temp = Val (new_temp_var !current_module) in
-        update_sc (Var temp) [Fld (se, (constructor, Some 0))];
+        let temp = Var (Val (new_temp_var !current_module)) in
+        update_sc temp [Fld (se, (constructor, Some 0))];
         let sub = solve_eq p temp in
         List.map (fun x -> Ctor_pat (constructor, [x])) sub)
     | Tpat_record (key_val_list, _) ->
@@ -217,23 +217,22 @@ let se_of_expr (expr : CL.Typedtree.expression) =
         | _ -> fail "Tried to match a record type without any fields"
       in
       let len = Array.length lbl_all in
-      solve_rec len e list
-    | Tpat_array list -> solve_ctor None e list
+      solve_rec len se list
+    | Tpat_array list -> solve_ctor None se list
     | Tpat_lazy p ->
-      let temp = Val (new_temp_var !current_module) in
-      update_sc (Var temp) [App_V (se, [])];
+      let temp = Var (Val (new_temp_var !current_module)) in
+      update_sc temp [App_V (se, [])];
       solve_eq p temp
-    | Tpat_or (lhs, rhs, _) -> solve_eq lhs e @ solve_eq rhs e
-  and solve_ctor constructor e list =
-    let se = Var e in
+    | Tpat_or (lhs, rhs, _) -> solve_eq lhs se @ solve_eq rhs se
+  and solve_ctor constructor se list =
     let l = ref list in
     let args = ref [] in
     let i = ref 0 in
     while !l <> [] do
       (match !l with
       | hd :: tl ->
-        let temp = Val (new_temp_var !current_module) in
-        update_sc (Var temp) [Fld (se, (constructor, Some !i))];
+        let temp = Var (Val (new_temp_var !current_module)) in
+        update_sc temp [Fld (se, (constructor, Some !i))];
         let ith_se = solve_eq hd temp in
         args := ith_se :: !args;
         l := tl
@@ -249,11 +248,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
         [[]] !args
     in
     List.map (fun l -> Ctor_pat (constructor, l)) flattened
-  and solve_rec len e list =
+  and solve_rec len se list =
     (* Solve `list = se` and return the set expression of the list
        For example, `list [x, y, z] = se` should return [T, T, T] and
        `list [x, 1, true] = se` should return [T, 1, true] *)
-    let se = Var e in
     let l = ref list in
     let args = ref [] in
     let cursor = ref 0 in
@@ -261,8 +259,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       match !l with
       | hd :: tl ->
         let i, p = hd in
-        let temp = Val (new_temp_var !current_module) in
-        update_sc (Var temp) [Fld (se, (None, Some i))];
+        let temp = Var (Val (new_temp_var !current_module)) in
+        update_sc temp [Fld (se, (None, Some i))];
         let ith_se = solve_eq p temp in
         while !cursor < i do
           args := [Top] :: !args;
@@ -288,12 +286,12 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     List.map (fun l -> Ctor_pat (None, l)) flattened
   in
   (* solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
-  let solve_param acc (pattern, guarded) =
+  let solve_param (acc : value se) (pattern, guarded) : value se =
     let p_list = solve_eq pattern acc in
     let for_each_pat acc p =
-      let temp_expr = Val (new_temp_var !current_module) in
-      update_sc (Var temp_expr) [Diff (Var acc, p)];
-      temp_expr
+      let temp_var = Var (Val (new_temp_var !current_module)) in
+      update_sc temp_var [Diff (acc, p)];
+      temp_var
     in
     if guarded then acc else List.fold_left for_each_pat acc p_list
   in
@@ -302,7 +300,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   match expr.exp_desc with
   | Texp_function {param; cases} ->
     let value_pg, body = List.split (List.map extract cases) in
-    let arg = Val (Expr_var (param, !current_module)) in
+    let arg = Var (Val (Expr_var (param, !current_module))) in
     List.fold_left solve_param arg value_pg |> ignore;
     ( [
         Fn
@@ -314,13 +312,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let value_pg, value_body = List.split (List.map extract cases) in
     let exn_pg, exn_body = List.split (List.map extract exn_cases) in
-    let val_exp = Val (expr_of_expr exp) in
-    let exn_exp = Packet (expr_of_expr exp) in
+    let val_exp = val_of_expr exp in
+    let exn_exp = packet_of_expr exp in
     let () = List.fold_left solve_param val_exp value_pg |> ignore in
     let uncaught_exn = List.fold_left solve_param exn_exp exn_pg in
     let values = val_list (value_body @ exn_body) in
     let exns = exn_list (value_body @ exn_body) in
-    (values, Var uncaught_exn :: exns)
+    (values, uncaught_exn :: exns)
   | ((Texp_match (exp, cases, _))
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let pg, body = List.split (List.map extract cases) in
@@ -357,20 +355,14 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let value_p, value_g, exn_p, exn_g = filter o g in
     let value_pg = List.combine value_p value_g in
     let exn_pg = List.combine exn_p exn_g in
-    let () =
-      List.fold_left solve_param (Val (expr_of_expr exp)) value_pg |> ignore
-    in
-    let uncaught_exn =
-      Var (List.fold_left solve_param (Packet (expr_of_expr exp)) exn_pg)
-    in
+    let () = List.fold_left solve_param (val_of_expr exp) value_pg |> ignore in
+    let uncaught_exn = List.fold_left solve_param (packet_of_expr exp) exn_pg in
     let values = val_list body in
     let exns = exn_list body in
     (values, uncaught_exn :: exns)
   | Texp_try (exp, cases) ->
     let exn_pg, body = List.split (List.map extract cases) in
-    let uncaught_exn =
-      Var (List.fold_left solve_param (Packet (expr_of_expr exp)) exn_pg)
-    in
+    let uncaught_exn = List.fold_left solve_param (packet_of_expr exp) exn_pg in
     let values = val_list body in
     let exns = exn_list body in
     (val_of_expr exp :: values, uncaught_exn :: exns)
@@ -549,7 +541,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       App_V (letop, [Some bound_expr; Some temp_fn])
     in
     let exn = App_P (letop, [Some bound_expr; Some temp_fn]) in
-    solve_eq body.c_lhs (Val (Expr_var temp)) |> ignore;
+    solve_eq body.c_lhs (Var (Val (Expr_var temp))) |> ignore;
     update_to_be let_loc let_path;
     ([value], exn :: exns)
   | ((Texp_open (_, exp)) [@if ocaml_version >= (4, 08, 0) && not_defined npm])

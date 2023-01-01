@@ -32,7 +32,9 @@ and arr =
   | Dynamic of loc
       (** dynamically allocated array, decoded from the Prim set expression *)
 
-and tagged_expr = Val : _ expr -> tagged_expr | Packet : _ expr -> tagged_expr
+and _ tagged_expr =
+  | Val : 'a expr -> 'a tagged_expr
+  | Packet : 'a expr -> 'a tagged_expr
 
 and ctor = string option
 (** variant : Some Types.cstr_name
@@ -91,7 +93,7 @@ and _ se =
   | Prim : CL.Primitive.description -> value se
       (** primitives, later converted to arith/rel/fld/mem *)
   | Fn : param * loc expr list -> value se  (** lambda expression *)
-  | Var : tagged_expr -> _ se  (** set variable *)
+  | Var : _ tagged_expr -> _ se  (** set variable *)
   | App_V : value se * arg -> value se
       (** possible values / force when arg = nil / prim_v when lhs is Prim *)
   | App_P : value se * arg -> value se

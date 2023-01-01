@@ -14,7 +14,7 @@ let rec merge_args = function
   | None :: tl, hd :: l -> hd :: merge_args (tl, l)
   | Some x :: tl, l -> Some x :: merge_args (tl, l)
 
-(* no support for arrays yet *)
+(* arrays or external functions returning records cannot be filtered *)
 let rec filter_pat = function
   | _, Top -> GESet.empty
   | Var x, p ->
@@ -32,9 +32,6 @@ let rec filter_pat = function
   | Loc (l, Some p), p' ->
     GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
   | x, p when x = p -> GESet.empty
-  | x, Const c -> if x <> Const c then GESet.singleton x else GESet.empty
-  | Top, Ctor_pat (kappa, l) ->
-    filter_pat (Ctor_pat (kappa, List.map (fun _ -> Top) l), Ctor_pat (kappa, l))
   | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
     if kappa <> kappa' || List.length l <> List.length l' then
       GESet.singleton (Ctor_pat (kappa, l))
@@ -88,13 +85,6 @@ let rec filter_pat_debug (x, y) =
   | x, p when x = p ->
     prerr_endline "lhs = rhs";
     GESet.empty
-  | x, Const c ->
-    prerr_endline "rhs = const";
-    if x <> Const c then GESet.singleton x else GESet.empty
-  | Top, Ctor_pat (kappa, arr) ->
-    prerr_endline "lhs = Top, rhs = Ctor, coerce Top into Ctor";
-    filter_pat_debug
-      (Ctor_pat (kappa, List.map (fun _ -> Top) arr), Ctor_pat (kappa, arr))
   | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
     prerr_endline "lhs, rhs = Ctor";
     if kappa <> kappa' || List.length l <> List.length l' then
@@ -140,6 +130,23 @@ let value_prim = function
     | _ -> SESet.empty)
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
     SESet.singleton (App_V (x, []))
+  | ( {
+        CL.Primitive.prim_name =
+          ( "%eq" | "%noteq" | "%ltint" | "%leint" | "%gtint" | "%geint"
+          | "%eqfloat" | "%noteqfloat" | "%ltfloat" | "%lefloat" | "%gtfloat"
+          | "%gefloat" | "%equal" | "%notequal" | "%lessequal" | "%lessthan"
+          | "%greaterequal" | "%greaterthan" | "%compare" | "%boolnot"
+          | "%sequand" | "%sequor" );
+      },
+      _ ) ->
+    SESet.of_list
+      [Ctor (Some "true", Static []); Ctor (Some "false", Static [])]
+  | ( {
+        CL.Primitive.prim_name =
+          "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
+      },
+      _ ) ->
+    SESet.empty
   | _ -> SESet.singleton Top
 
 let packet_prim = function

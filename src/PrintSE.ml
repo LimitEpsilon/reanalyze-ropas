@@ -64,7 +64,7 @@ let print_expr : type k. k expr -> unit = function
     print_loc loc;
     prerr_string ")"
 
-let print_tagged_expr : tagged_expr -> unit = function
+let print_tagged_expr : _ tagged_expr -> unit = function
   | Val v ->
     prerr_string "Val (";
     print_expr v;
@@ -152,14 +152,13 @@ and print_pattern : pattern se -> unit = function
     prerr_string ", ";
     print_pattern_list_with_separator arr ";";
     prerr_string ")"
-  | Loc ((i, name), p) ->
-    prerr_string "(";
-    prerr_int i;
-    prerr_string ", ";
-    (match p with
+  | Loc ((i, name), p) -> (
+    match p with
     | Some p -> print_pattern p
-    | _ -> to_be_explained := LocSet.add (i, name) !to_be_explained);
-    prerr_string ")"
+    | _ ->
+      prerr_string "ℓ_";
+      prerr_int i;
+      to_be_explained := LocSet.add (i, name) !to_be_explained)
   | _ -> ()
 
 and print_ses (xs : value se list) =
@@ -332,43 +331,33 @@ let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
 
 let tracked_vars = Hashtbl.create 10
 
-exception Unexpected_se
-
 let rec track_exception (x : value se) (exn : pattern se) =
   let propagate = function
-    | Var (Packet (Expr x)) ->
-      let exns =
-        try Hashtbl.find grammar (Var (Packet (Expr x))) with _ -> GESet.empty
+    | Var x -> (
+      let exns = try Hashtbl.find grammar (Var x) with _ -> GESet.empty in
+      let filter p =
+        exn = p
+        ||
+        match exn with
+        | Ctor_pat (k, _) -> (
+          match p with Ctor_pat (k', _) -> k = k' | _ -> false)
+        | _ -> false
       in
-      if GESet.mem exn exns then (
-        try
+      let filtered = GESet.filter filter exns in
+      if not (GESet.is_empty filtered) then
+        match x with
+        | Val (Expr e) ->
+          prerr_string "  raised from: ";
+          print_loc e;
+          prerr_newline ()
+        | _ ->
           SESet.iter
             (function
               | Var x -> track_exception (Var x) exn
               | Diff (Var x, _) -> track_exception (Var x) exn
               | _ -> ())
-            (lookup_sc (Var (Packet (Expr x))))
-        with Unexpected_se ->
-          prerr_string "  raised from: ";
-          print_loc x;
-          prerr_newline ())
-    | Var (Packet (Expr_var x)) ->
-      let exns =
-        try Hashtbl.find grammar (Var (Packet (Expr_var x)))
-        with _ -> GESet.empty
-      in
-      if GESet.mem exn exns then
-        SESet.iter
-          (function
-            | Var x -> track_exception (Var x) exn
-            | Diff (Var x, _) -> track_exception (Var x) exn
-            | _ -> ())
-          (try lookup_sc (Var (Packet (Expr_var x))) with _ -> SESet.empty)
-    | Var (Val (Expr x)) ->
-      prerr_string "  raised from: ";
-      print_loc x;
-      prerr_newline ()
-    | _ -> raise Unexpected_se
+            (lookup_sc (Var x)))
+    | _ -> assert false
   in
   match Hashtbl.find tracked_vars x with
   | exception Not_found ->
@@ -376,35 +365,63 @@ let rec track_exception (x : value se) (exn : pattern se) =
     propagate x
   | () -> ()
 
+let explain_abs_mem () =
+  if not (LocSet.is_empty !to_be_explained) then
+    prerr_endline " Where abstract locations contain:";
+  LocSet.iter
+    (fun (i, name) ->
+      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
+      prerr_string " ℓ_";
+      prerr_int i;
+      prerr_string ":\n";
+      show_pattern_with_separator set "  ")
+    !to_be_explained;
+  to_be_explained := LocSet.empty
+
 let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
       prerr_string "Exceptions in file ";
       prerr_string key;
       prerr_newline ();
-      List.iter
-        (function
-          | Var (Packet (Expr loc)) ->
-            let set =
-              try Hashtbl.find grammar (Var (Packet (Expr loc)))
-              with _ -> GESet.empty
-            in
-            if GESet.is_empty set then ()
-            else (
-              prerr_string " escaped from ";
-              print_loc loc;
-              prerr_endline ":";
-              GESet.iter
-                (function
-                  | Ctor_pat (Some ctor, _) as exn ->
-                    prerr_string (" " ^ ctor ^ ":\n");
-                    Hashtbl.clear tracked_vars;
-                    track_exception (Var (Packet (Expr loc))) exn
-                  | _ -> ())
-                set;
-              prerr_newline ())
-          | _ -> ())
-        data)
+      if data = [] then prerr_string " No escaping exceptions\n\n"
+      else
+        let printed = ref false in
+        let () =
+          List.iter
+            (function
+              | Var (Packet (Expr loc)) ->
+                let set =
+                  try Hashtbl.find grammar (Var (Packet (Expr loc)))
+                  with _ -> GESet.empty
+                in
+                if GESet.is_empty set then ()
+                else (
+                  printed := true;
+                  prerr_string " Escaped from ";
+                  print_loc loc;
+                  prerr_endline ":";
+                  GESet.iter
+                    (function
+                      | Ctor_pat (Some ctor, l) as exn ->
+                        prerr_string (" " ^ ctor ^ " with arguments ");
+                        print_pattern_list_with_separator l ";";
+                        prerr_string ":\n";
+                        Hashtbl.clear tracked_vars;
+                        track_exception (Var (Packet (Expr loc))) exn;
+                        explain_abs_mem ()
+                      | exn ->
+                        prerr_string " ";
+                        print_pattern exn;
+                        prerr_string ":\n";
+                        Hashtbl.clear tracked_vars;
+                        track_exception (Var (Packet (Expr loc))) exn)
+                    set;
+                  prerr_newline ())
+              | _ -> ())
+            data
+        in
+        if !printed then () else prerr_string " No escaping exceptions\n\n")
     tbl
 
 let show_closure_analysis tbl =
@@ -430,19 +447,6 @@ let show_closure_analysis tbl =
         tbl)
     tbl
 
-let explain_abs_mem () =
-  prerr_endline "where abstract locations contain:";
-  LocSet.iter
-    (fun (i, name) ->
-      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
-      prerr_string "\tlocation ";
-      prerr_int i;
-      prerr_newline ();
-      show_pattern_with_separator set "\t\t";
-      prerr_newline ())
-    !to_be_explained;
-  to_be_explained := LocSet.empty
-
 let print_sc_info () =
   show_mem memory;
   show_var_se_tbl var_to_se;
@@ -454,8 +458,7 @@ let print_grammar () =
 
 let print_exa () =
   Format.flush_str_formatter () |> ignore;
-  show_exn_of_file exn_of_file;
-  explain_abs_mem ()
+  show_exn_of_file exn_of_file
 
 let print_closure () =
   Format.flush_str_formatter () |> ignore;
