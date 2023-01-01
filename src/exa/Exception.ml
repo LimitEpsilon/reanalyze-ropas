@@ -1,4 +1,4 @@
-[%%import "../config.h"]
+[%%import "../../config.h"]
 
 open CL
 open SetExpression

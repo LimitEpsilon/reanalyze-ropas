@@ -1,5 +1,6 @@
 (copy_files# ext/*.{ml,mli})
 (copy_files# vendor/*.{ml,mli})
+(copy_files# exa/*.{ml,mli})
 
 (executable
  (public_name reanalyze.exe)
