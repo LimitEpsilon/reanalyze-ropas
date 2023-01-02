@@ -187,6 +187,8 @@ let resolve_var var elt =
     let l' = List.map (fun i -> Loc (i, None)) l in
     update_g var (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
+  | Ctor (None, Dynamic l) when Worklist.mem (hash elt) prev_worklist ->
+    update_g var (GESet.singleton (Arr_pat l)) |> ignore
   | Var x when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let set =
@@ -331,6 +333,19 @@ let resolve_var var elt =
           in
           update_c (Var var) c_set |> ignore;
           update_g var g_set |> ignore
+        | Arr_pat l ->
+          let c_set =
+            SESet.filter
+              (function
+                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                | App_V (Prim p, l) ->
+                  if p.prim_arity <> arg_len l then true else false
+                | _ -> false)
+              (try lookup_mem l with _ -> SESet.empty)
+          in
+          let g_set = try Hashtbl.find abs_mem l with _ -> GESet.empty in
+          update_c (Var var) c_set |> ignore;
+          update_g var g_set |> ignore
         | _ -> ())
       (try Hashtbl.find grammar (Var x) with _ -> GESet.empty);
     time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
@@ -422,6 +437,7 @@ let resolve_update (var, i) set =
                 back_propagate var (GESet.singleton temp_pat))
             | Loc (l, None) -> update_loc l set |> ignore
             | _ -> ())
+        | Arr_pat l -> update_loc l set |> ignore
         | _ -> ())
       p_set
   | exception _ -> ()
@@ -429,7 +445,8 @@ let resolve_update (var, i) set =
 let step_sc_for_entry x set =
   match x with
   | Var var -> SESet.iter (resolve_var var) set
-  | Fld (Var var, (None, Some i)) ->
+  | Fld (Var var, (None, Some i))
+    when Worklist.mem (hash (Var var)) prev_worklist ->
     let t = Unix.gettimeofday () in
     resolve_update (var, i) set;
     time_spent_in_update := !time_spent_in_update +. (Unix.gettimeofday () -. t)
@@ -470,6 +487,8 @@ let resolve_mem loc elt =
     let l' = List.map (fun i -> Loc (i, None)) l in
     update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
+  | Ctor (None, Dynamic l) when Worklist.mem (hash elt) prev_worklist ->
+    update_abs_loc loc (GESet.singleton (Arr_pat l)) |> ignore
   | Var x when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let set =
@@ -610,6 +629,19 @@ let resolve_mem loc elt =
               | p -> GESet.singleton p
             else GESet.empty
           in
+          update_loc loc c_set |> ignore;
+          update_abs_loc loc g_set |> ignore
+        | Arr_pat l ->
+          let c_set =
+            SESet.filter
+              (function
+                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+                | App_V (Prim p, l) ->
+                  if p.prim_arity <> arg_len l then true else false
+                | _ -> false)
+              (try lookup_mem l with _ -> SESet.empty)
+          in
+          let g_set = try Hashtbl.find abs_mem l with _ -> GESet.empty in
           update_loc loc c_set |> ignore;
           update_abs_loc loc g_set |> ignore
         | _ -> ())

@@ -1,35 +1,5 @@
 open SetExpression
 
-let string_of_arithop : arithop -> string = function
-  | INT x | INT32 x | INT64 x | FLOAT x | NATURALINT x -> (
-    match x with
-    | ADD -> "+"
-    | SUB -> "-"
-    | DIV -> "÷"
-    | MUL -> "×"
-    | NEG -> "~-"
-    | ABS -> "abs"
-    | MOD -> "mod"
-    | AND -> "&&"
-    | OR -> "||"
-    | NOT -> "not"
-    | XOR -> "xor"
-    | LSL -> "lsl"
-    | LSR -> "lsr"
-    | ASR -> "asr"
-    | SUCC -> "++"
-    | PRED -> "--")
-
-let string_of_relop : relop -> string = function
-  | GEN x -> (
-    match x with
-    | EQ -> "=="
-    | NE -> "<>"
-    | LT -> "<"
-    | LE -> "<="
-    | GT -> ">"
-    | GE -> ">=")
-
 module Loc = struct
   type t = loc
 
@@ -125,12 +95,6 @@ let rec print_se : value se -> unit = function
       prerr_int i
     | _, None -> prerr_string " , ");
     prerr_string "))"
-  | Arith (op, xs) ->
-    Printf.eprintf "( %s ) " (string_of_arithop op);
-    print_ses xs
-  | Rel (rel, xs) ->
-    Printf.eprintf "( %s ) " (string_of_relop rel);
-    print_ses xs
   | Diff (x, y) ->
     prerr_string "(";
     print_se x;
@@ -151,6 +115,11 @@ and print_pattern : pattern se -> unit = function
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string ", ";
     print_pattern_list_with_separator arr ";";
+    prerr_string ")"
+  | Arr_pat (i, _) ->
+    prerr_string "Arr (";
+    prerr_string "ℓ_";
+    print_int i;
     prerr_string ")"
   | Loc ((i, name), p) -> (
     match p with

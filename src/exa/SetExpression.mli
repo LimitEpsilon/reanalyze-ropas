@@ -30,35 +30,6 @@ and _ tagged_expr =
 
 and ctor = string option
 and fld = ctor * int option
-
-and arith =
-  | ADD
-  | SUB
-  | DIV
-  | MUL
-  | NEG
-  | ABS
-  | MOD
-  | AND
-  | OR
-  | NOT
-  | XOR
-  | LSL
-  | LSR
-  | ASR
-  | SUCC
-  | PRED
-
-and rel = EQ | NE | LT | LE | GT | GE
-
-and arithop =
-  | INT of arith
-  | INT32 of arith
-  | INT64 of arith
-  | FLOAT of arith
-  | NATURALINT of arith
-
-and relop = GEN of rel
 and pattern
 and value
 and loc = int * string
@@ -73,9 +44,8 @@ and _ se =
   | App_P : value se * arg -> value se
   | Ctor : ctor * arr -> value se
   | Ctor_pat : ctor * pattern se list -> pattern se
+  | Arr_pat : loc -> pattern se
   | Fld : value se * fld -> value se
-  | Arith : arithop * value se list -> value se
-  | Rel : relop * value se list -> value se
   | Diff : value se * pattern se -> value se
   | Loc : loc * pattern se option -> pattern se
 

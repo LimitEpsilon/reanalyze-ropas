@@ -46,40 +46,6 @@ and fld = ctor * int option
     i-th field of a tuple or record : (None, Some i)
     dynamic access through the Array.get primitive : (None, None) *)
 
-and arith =
-  | ADD
-  | SUB
-  | DIV
-  | MUL
-  | NEG
-  | ABS  (** absolute value *)
-  | MOD
-  | AND
-  | OR
-  | NOT
-  | XOR
-  | LSL  (** <<, logical *)
-  | LSR  (** >>, logical *)
-  | ASR  (** >>, arithmetic sign extension *)
-  | SUCC  (** ++x *)
-  | PRED  (** --x *)
-
-and rel =
-  | EQ  (** == *)
-  | NE  (** <> *)
-  | LT  (** < *)
-  | LE  (** <= *)
-  | GT  (** > *)
-  | GE  (** >= *)
-
-and arithop =
-  | INT of arith
-  | INT32 of arith
-  | INT64 of arith
-  | FLOAT of arith
-  | NATURALINT of arith
-
-and relop = GEN of rel
 and pattern
 (* phantom type for pattern screening *)
 
@@ -101,9 +67,8 @@ and _ se =
   | Ctor : ctor * arr -> value se  (** One ADT to rule them all :D *)
   | Ctor_pat : ctor * pattern se list -> pattern se
       (** For pattern screening *)
+  | Arr_pat : loc -> pattern se
   | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
-  | Arith : arithop * value se list -> value se  (** arithmetic operators *)
-  | Rel : relop * value se list -> value se  (** relation operators *)
   | Diff : value se * pattern se -> value se  (** screening *)
   | Loc : loc * pattern se option -> pattern se
 
@@ -401,19 +366,22 @@ end
 
 module GESet = Set.Make (GE)
 
+let update_l l idx =
+  match find affected_vars l with
+  | exception Not_found ->
+    let new_tbl = create 1 in
+    add new_tbl idx ();
+    add affected_vars l new_tbl
+  | original -> Worklist.add idx original
+
 let update_worklist_g key set =
-  let update_l = function
-    | Loc (l, None) -> (
-      match find affected_vars l with
-      | exception Not_found ->
-        let new_tbl = create 1 in
-        add new_tbl (hash key) ();
-        add affected_vars l new_tbl
-      | original -> Worklist.add (hash key) original)
+  let for_each_loc = function
+    | Loc (l, None) -> update_l l (hash key)
     | _ -> ()
   in
   let summarize = function
-    | Ctor_pat (_, arr) -> List.iter update_l arr
+    | Ctor_pat (_, arr) -> List.iter for_each_loc arr
+    | Arr_pat l -> update_l l (hash key)
     | _ -> ()
   in
   GESet.iter summarize set;
