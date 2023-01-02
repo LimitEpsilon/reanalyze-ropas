@@ -46,11 +46,12 @@ and diff_list (rev_hd, tl) tl' =
   match (tl, tl') with
   | [], _ -> []
   | hd :: tl1, hd' :: tl2 ->
-    let set = filter_pat (hd, hd') in
-    let diff_rest = diff_list (hd :: rev_hd, tl1) tl2 in
+    let diff = filter_pat (hd, hd') in
+    let inter = match hd with Loc (l, _) -> Loc (l, Some hd') | _ -> hd' in
+    let diff_rest = diff_list (inter :: rev_hd, tl1) tl2 in
     GESet.fold
       (fun x acc -> List.rev_append rev_hd (x :: tl1) :: acc)
-      set diff_rest
+      diff diff_rest
   | _ -> []
 
 let rec filter_pat_debug (x, y) =
