@@ -21,6 +21,7 @@ module Cli = struct
   (** The command was a -cmt variant (e.g. -exception-cmt) *)
   let cmtCommand = ref false
 
+  let ctor_to_track = ref ""
   let experimental = ref false
   let json = ref false
   let write = ref false

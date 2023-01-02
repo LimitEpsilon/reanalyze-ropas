@@ -177,12 +177,11 @@ let resolve_var var elt =
     let t = Unix.gettimeofday () in
     update_g var (GESet.singleton Top) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-  | Const c when !first ->
+  | Const c ->
     let t = Unix.gettimeofday () in
     update_g var (GESet.singleton (Const c)) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-  | Ctor (kappa, Static l) when !first || Worklist.mem (hash elt) prev_worklist
-    ->
+  | Ctor (kappa, Static l) when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let l' = List.map (fun i -> Loc (i, None)) l in
     update_g var (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
@@ -448,8 +447,7 @@ let resolve_update (var, i) set =
 let step_sc_for_entry x set =
   match x with
   | Var var -> SESet.iter (resolve_var var) set
-  | Fld (Var var, (None, Some i))
-    when Worklist.mem (hash (Var var)) prev_worklist ->
+  | Fld (Var var, (None, Some i)) ->
     let t = Unix.gettimeofday () in
     resolve_update (var, i) set;
     time_spent_in_update := !time_spent_in_update +. (Unix.gettimeofday () -. t)
@@ -458,7 +456,7 @@ let step_sc_for_entry x set =
 let step_sc_for_file tbl = Hashtbl.iter step_sc_for_entry tbl
 
 let step_sc added_file =
-  if !linking then
+  if not !first then
     let to_be_reduced =
       Seq.fold_left
         (fun acc (idx, ()) ->
@@ -480,12 +478,11 @@ let resolve_mem loc elt =
     let t = Unix.gettimeofday () in
     update_abs_loc loc (GESet.singleton Top) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-  | Const c when !first ->
+  | Const c ->
     let t = Unix.gettimeofday () in
     update_abs_loc loc (GESet.singleton (Const c)) |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
-  | Ctor (kappa, Static l) when !first || Worklist.mem (hash elt) prev_worklist
-    ->
+  | Ctor (kappa, Static l) when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let l' = List.map (fun i -> Loc (i, None)) l in
     update_abs_loc loc (GESet.singleton (Ctor_pat (kappa, l'))) |> ignore;
@@ -509,8 +506,11 @@ let resolve_mem loc elt =
     time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
   | App_V (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
     let t = Unix.gettimeofday () in
-    if p.prim_arity = arg_len l then
-      update_loc loc (value_prim (p, l)) |> ignore;
+    if p.prim_arity = arg_len l then (
+      let val_prim = value_prim (p, l) in
+      update_loc loc val_prim |> ignore;
+      if SESet.mem Top val_prim then
+        update_abs_loc loc (GESet.singleton Top) |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
@@ -695,7 +695,7 @@ let step_mem_for_file tbl =
   Hashtbl.iter (fun loc set -> SESet.iter (resolve_mem loc) set) tbl
 
 let step_mem added_file =
-  if !linking then
+  if not !first then
     let to_be_reduced =
       Seq.fold_left
         (fun acc (idx, ()) ->

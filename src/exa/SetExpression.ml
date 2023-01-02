@@ -169,7 +169,8 @@ let update_reverse_sc key set =
     | exception Not_found -> add reverse_sc idx (SESet.singleton key)
     | orig -> replace reverse_sc idx (SESet.add key orig)
   in
-  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set
+  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set;
+  match key with Fld (Var x, _) -> summarize (Var x) | _ -> ()
 
 let get_context_fld = function
   | Fld
@@ -178,14 +179,14 @@ let get_context_fld = function
           | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ),
         _ ) ->
     ctx
-  | _ -> assert false
+  | _ -> raise Not_found
 
 let get_context = function
   | Var
       ( Val (Expr (_, ctx) | Expr_var (_, ctx))
       | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ) ->
     ctx
-  | _ -> assert false
+  | _ -> raise Not_found
 
 let lookup_sc key =
   let context = try get_context key with _ -> get_context_fld key in

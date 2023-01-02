@@ -175,6 +175,9 @@ let cli () =
         String (fun s -> setException (Some s)),
         "root_path Experimental exception analysis for all the .cmt files \
          under the root path" );
+      ( "-exception-track",
+        String (fun s -> Cli.ctor_to_track := s),
+        "ctor_to_track Specify exception constructor to track" );
       ( "-native-build-target",
         String (fun s -> Common.Cli.nativeBuildTarget := Some s),
         "A path for the build target, defaults to ''. Can be useful for native \

@@ -299,6 +299,7 @@ let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
     a
 
 let tracked_vars = Hashtbl.create 10
+let track_path = ref false
 
 let rec track_exception (x : value se) (exn : pattern se) =
   let propagate = function
@@ -314,6 +315,11 @@ let rec track_exception (x : value se) (exn : pattern se) =
       in
       let filtered = GESet.filter filter exns in
       if not (GESet.is_empty filtered) then
+        let () =
+          if !track_path then (
+            print_tagged_expr x;
+            prerr_newline ())
+        in
         match x with
         | Val (Expr e) ->
           prerr_string "  raised from: ";
@@ -373,6 +379,7 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
                   GESet.iter
                     (function
                       | Ctor_pat (Some ctor, l) as exn ->
+                        track_path := ctor = !Common.Cli.ctor_to_track;
                         prerr_string (" " ^ ctor ^ " with arguments ");
                         print_pattern_list_with_separator l ";";
                         prerr_string ":\n";
