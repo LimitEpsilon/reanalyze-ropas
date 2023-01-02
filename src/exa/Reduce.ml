@@ -206,8 +206,11 @@ let resolve_var var elt =
     time_spent_in_var := !time_spent_in_var +. (Unix.gettimeofday () -. t)
   | App_V (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
     let t = Unix.gettimeofday () in
-    if p.prim_arity = arg_len l then
-      update_c (Var var) (value_prim (p, l)) |> ignore;
+    if p.prim_arity = arg_len l then (
+      let val_prim = value_prim (p, l) in
+      update_c (Var var) val_prim |> ignore;
+      if SESet.mem Top val_prim then
+        update_g var (GESet.singleton Top) |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
