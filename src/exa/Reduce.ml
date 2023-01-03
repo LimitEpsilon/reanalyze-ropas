@@ -1,5 +1,4 @@
 open SetExpression
-open PrintSE
 
 let first = ref true
 
@@ -15,94 +14,61 @@ let rec merge_args = function
   | Some x :: tl, l -> Some x :: merge_args (tl, l)
 
 (* arrays or external functions returning records cannot be filtered *)
+(* filter_pat (p, p') returns (p ∩ p', p - p') *)
 let rec filter_pat = function
-  | _, Top -> GESet.empty
+  | x, Top -> (GESet.singleton x, GESet.empty)
+  | Top, x -> (GESet.singleton x, GESet.singleton Top)
   | Var x, p ->
     GESet.fold
-      (fun y acc -> GESet.union (filter_pat (y, p)) acc)
+      (fun y (acc_inter, acc_diff) ->
+        let inter, diff = filter_pat (y, p) in
+        (GESet.union inter acc_inter, GESet.union diff acc_diff))
       (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
-      GESet.empty
+      (GESet.empty, GESet.empty)
   | Loc (l, None), p ->
-    GESet.map
-      (fun x -> Loc (l, Some x))
-      (GESet.fold
-         (fun y acc -> GESet.union (filter_pat (y, p)) acc)
-         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
-         GESet.empty)
-  | Loc (l, Some p), p' ->
-    GESet.map (fun x -> Loc (l, Some x)) (filter_pat (p, p'))
-  | x, p when x = p -> GESet.empty
-  | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
-    if kappa <> kappa' || List.length l <> List.length l' then
-      GESet.singleton (Ctor_pat (kappa, l))
-    else
-      let filtered_lists =
-        List.map (fun l -> Ctor_pat (kappa, l)) (diff_list ([], l) l')
-      in
-      GESet.of_list filtered_lists
-  | x, _ -> GESet.singleton x
-
-and diff_list (rev_hd, tl) tl' =
-  match (tl, tl') with
-  | [], _ -> []
-  | hd :: tl1, hd' :: tl2 ->
-    let diff = filter_pat (hd, hd') in
-    let inter =
-      match hd with
-      | _ when hd' = Top -> hd
-      | Loc (l, _) -> Loc (l, Some hd')
-      | _ -> hd'
+    let inter, diff =
+      GESet.fold
+        (fun y (acc_inter, acc_diff) ->
+          let inter, diff = filter_pat (y, p) in
+          (GESet.union inter acc_inter, GESet.union diff acc_diff))
+        (try Hashtbl.find abs_mem l with _ -> GESet.empty)
+        (GESet.empty, GESet.empty)
     in
-    let diff_rest = diff_list (inter :: rev_hd, tl1) tl2 in
-    GESet.fold
-      (fun x acc -> List.rev_append rev_hd (x :: tl1) :: acc)
-      diff diff_rest
-  | _ -> []
-
-let rec filter_pat_debug (x, y) =
-  prerr_string "\t";
-  print_pattern x;
-  prerr_newline ();
-  prerr_string "\t";
-  print_pattern y;
-  prerr_newline ();
-  prerr_string "\t\t";
-  match (x, y) with
-  | _, Top ->
-    prerr_endline "rhs = Top";
-    GESet.empty
-  | Var x, p ->
-    prerr_endline "lhs = var";
-    GESet.fold
-      (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
-      (try Hashtbl.find grammar (Var x) with _ -> GESet.empty)
-      GESet.empty
-  | Loc (l, None), p ->
-    prerr_endline "lhs = loc";
-    GESet.map
-      (fun x -> Loc (l, Some x))
-      (GESet.fold
-         (fun y acc -> GESet.union (filter_pat_debug (y, p)) acc)
-         (try Hashtbl.find abs_mem l with _ -> GESet.empty)
-         GESet.empty)
+    ( GESet.map (fun x -> Loc (l, Some x)) inter,
+      GESet.map (fun x -> Loc (l, Some x)) diff )
   | Loc (l, Some p), p' ->
-    prerr_endline "lhs = loc with pat";
-    GESet.map (fun x -> Loc (l, Some x)) (filter_pat_debug (p, p'))
-  | x, p when x = p ->
-    prerr_endline "lhs = rhs";
-    GESet.empty
+    let inter, diff = filter_pat (p, p') in
+    ( GESet.map (fun x -> Loc (l, Some x)) inter,
+      GESet.map (fun x -> Loc (l, Some x)) diff )
+  | x, p when x = p -> (GESet.singleton x, GESet.empty)
+  | x, Const c when x <> Const c -> (GESet.empty, GESet.singleton x)
+  | Const c, p when Const c <> p -> (GESet.empty, GESet.singleton (Const c))
   | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
-    prerr_endline "lhs, rhs = Ctor";
     if kappa <> kappa' || List.length l <> List.length l' then
-      GESet.singleton (Ctor_pat (kappa, l))
+      (GESet.empty, GESet.singleton (Ctor_pat (kappa, l)))
     else
-      let filtered_lists =
-        List.map (fun l -> Ctor_pat (kappa, l)) (diff_list ([], l) l')
-      in
-      GESet.of_list filtered_lists
-  | x, _ ->
-    prerr_endline "else";
-    GESet.singleton x
+      let inter, diff = filter_list ([[]], l) l' in
+      ( GESet.of_list (List.map (fun l -> Ctor_pat (kappa, l)) inter),
+        GESet.of_list (List.map (fun l -> Ctor_pat (kappa, l)) diff) )
+  | _ -> assert false
+
+and filter_list ((rev_hd : pattern se list list), tl) tl' =
+  match (tl, tl') with
+  | [], _ -> (List.map List.rev rev_hd, [])
+  | hd :: tl1, hd' :: tl2 ->
+    let inter, diff = filter_pat (hd, hd') in
+    let new_rev_hd =
+      GESet.fold (fun p acc -> List.map (fun l -> p :: l) rev_hd @ acc) inter []
+    in
+    let inter_total, diff_rest = filter_list (new_rev_hd, tl1) tl2 in
+    let diff_total =
+      GESet.fold
+        (fun x acc ->
+          List.map (fun rev -> List.rev_append rev (x :: tl1)) rev_hd @ acc)
+        diff diff_rest
+    in
+    (inter_total, diff_total)
+  | _ -> assert false
 
 let allocated = Hashtbl.create 10
 
@@ -398,8 +364,8 @@ let resolve_var var elt =
       (match x with
       | Val (Expr_var (x, _)) -> prerr_endline (CL.Ident.name x)
       | _ -> ());
-      update_g var (filter_pat_debug (Var x, p)) |> ignore)
-    else update_g var (filter_pat (Var x, p)) |> ignore;
+      update_g var (snd (filter_pat (Var x, p))) |> ignore)
+    else update_g var (snd (filter_pat (Var x, p))) |> ignore;
     time_spent_in_filter := !time_spent_in_filter +. (Unix.gettimeofday () -. t)
   | _ -> ()
 
@@ -693,7 +659,7 @@ let resolve_mem loc elt =
     time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
   | Diff (Var x, p) when Worklist.mem (hash (Var x)) prev_worklist ->
     let t = Unix.gettimeofday () in
-    update_abs_loc loc (filter_pat (Var x, p)) |> ignore;
+    update_abs_loc loc (snd (filter_pat (Var x, p))) |> ignore;
     time_spent_in_filter := !time_spent_in_filter +. (Unix.gettimeofday () -. t)
   | _ -> ()
 
@@ -705,14 +671,13 @@ let step_mem added_file =
     let to_be_reduced =
       Seq.fold_left
         (fun acc (idx, ()) ->
-          SetExpression.LocSet.union
-            (try Hashtbl.find reverse_mem idx
-             with Not_found -> SetExpression.LocSet.empty)
+          LocSet.union
+            (try Hashtbl.find reverse_mem idx with Not_found -> LocSet.empty)
             acc)
-        SetExpression.LocSet.empty
+        LocSet.empty
         (Hashtbl.to_seq prev_worklist)
     in
-    SetExpression.LocSet.iter
+    LocSet.iter
       (fun x ->
         SESet.iter (resolve_mem x)
           (try lookup_mem x with Not_found -> SESet.empty))
