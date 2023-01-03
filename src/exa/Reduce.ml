@@ -54,7 +54,7 @@ let rec filter_pat = function
 
 and filter_list ((rev_hd : pattern se list list), tl) tl' =
   match (tl, tl') with
-  | [], _ -> (List.map List.rev rev_hd, [])
+  | [], [] -> (List.map List.rev rev_hd, [])
   | hd :: tl1, hd' :: tl2 ->
     let inter, diff = filter_pat (hd, hd') in
     let new_rev_hd =
