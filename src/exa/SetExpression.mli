@@ -56,7 +56,26 @@ val new_memory : string -> loc
 val new_temp_var : string -> param expr
 val hash : 'a -> int
 
-module SESet : Set.S with type elt = value se
+module SESet : sig
+  module Internal : Set.S with type elt = value se
+
+  type t = Set of Internal.t | Total
+
+  val empty : t
+  val mem : value se -> t -> bool
+  val add : value se -> t -> t
+  val inter : t -> t -> t
+  val union : t -> t -> t
+  val diff : t -> t -> t
+  val is_empty : t -> bool
+  val elements : t -> value se list
+  val of_list : value se list -> t
+  val filter : (value se -> bool) -> t -> t
+  val iter : (value se -> unit) -> t -> unit
+  val fold : (value se -> 'a -> 'a) -> t -> 'a -> 'a
+  val singleton : value se -> t
+  val map : (value se -> value se) -> t -> t
+end
 
 module Worklist : sig
   type t = (int, unit) Hashtbl.t
@@ -81,17 +100,17 @@ val worklist : Worklist.t
 val sc : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t
 val reverse_sc : (int, SESet.t) Hashtbl.t
 val lookup_sc : value se -> SESet.t
-val update_sc : value se -> SESet.elt list -> unit
+val update_sc : value se -> value se list -> unit
 val memory : (string, (loc, SESet.t) Hashtbl.t) Hashtbl.t
 val reverse_mem : (int, LocSet.t) Hashtbl.t
 val lookup_mem : loc -> SESet.t
-val update_mem : loc -> SESet.elt list -> unit
+val update_mem : loc -> value se list -> unit
 
 type var_se_tbl = (string, (CL.Ident.t, SESet.t) Hashtbl.t) Hashtbl.t
 
 val var_to_se : var_se_tbl
-val update_var : CL.Ident.t -> SESet.elt list -> unit
-val se_of_var : CL.Ident.t -> string -> SESet.elt list
+val update_var : CL.Ident.t -> value se list -> unit
+val se_of_var : CL.Ident.t -> string -> value se list
 
 type to_be_resolved = (loc, CL.Path.t * string) Hashtbl.t
 
@@ -105,7 +124,26 @@ val changed : bool ref
 val prev_worklist : Worklist.t
 val exn_of_file : (string, value se list) Hashtbl.t
 
-module GESet : Set.S with type elt = pattern se
+module GESet : sig
+  module Internal : Set.S with type elt = pattern se
+
+  type t = Set of Internal.t | Total
+
+  val empty : t
+  val mem : pattern se -> t -> bool
+  val add : pattern se -> t -> t
+  val inter : t -> t -> t
+  val union : t -> t -> t
+  val diff : t -> t -> t
+  val is_empty : t -> bool
+  val elements : t -> pattern se list
+  val of_list : pattern se list -> t
+  val filter : (pattern se -> bool) -> t -> t
+  val iter : (pattern se -> unit) -> t -> unit
+  val fold : (pattern se -> 'a -> 'a) -> t -> 'a -> 'a
+  val singleton : pattern se -> t
+  val map : (pattern se -> pattern se) -> t -> t
+end
 
 val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> bool

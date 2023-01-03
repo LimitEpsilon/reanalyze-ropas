@@ -125,7 +125,63 @@ module SE = struct
   let compare = compare
 end
 
-module SESet = Set.Make (SE)
+module SESet = struct
+  module Internal = Set.Make (SE)
+
+  type t = Set of Internal.t | Total
+
+  let empty = Set Internal.empty
+
+  let mem (x : value se) (set : t) =
+    match set with Total -> true | Set s -> Internal.mem x s
+
+  let add (x : value se) (set : t) =
+    match (x, set) with
+    | Top, _ -> Total
+    | _, Total -> Total
+    | _, Set s -> Set (Internal.add x s)
+
+  let inter (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> s1
+    | Total, _ -> s2
+    | Set s1, Set s2 -> Set (Internal.inter s1 s2)
+
+  let union (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> Total
+    | Total, _ -> Total
+    | Set s1, Set s2 -> Set (Internal.union s1 s2)
+
+  let diff (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> Set Internal.empty
+    | Total, _ -> Total
+    | Set s1, Set s2 -> Set (Internal.diff s1 s2)
+
+  let is_empty = function Total -> false | Set s -> Internal.is_empty s
+  let elements = function Total -> [Top] | Set s -> Internal.elements s
+  let of_list l = if List.mem Top l then Total else Set (Internal.of_list l)
+
+  let filter f = function
+    | Total -> if f Top then Total else empty
+    | Set s -> Set (Internal.filter f s)
+
+  let iter f = function Total -> f Top | Set s -> Internal.iter f s
+
+  let fold f set acc =
+    match set with Total -> f Top acc | Set s -> Internal.fold f s acc
+
+  let singleton = function Top -> Total | x -> Set (Internal.singleton x)
+
+  let map f = function
+    | Total ->
+      let elt = f Top in
+      singleton elt
+    | Set s ->
+      let set = Internal.map f s in
+      if Internal.mem Top set then Total else Set set
+end
 
 module Worklist = struct
   type t = (int, unit) Hashtbl.t
@@ -356,7 +412,7 @@ let packet_of_expr e = Var (Packet (expr_of_expr e))
 
 (* for resolution *)
 let changed = ref false
-let prev_worklist = create 10
+let prev_worklist : Worklist.t = create 10
 let exn_of_file = create 10
 
 module GE = struct
@@ -365,7 +421,63 @@ module GE = struct
   let compare = compare
 end
 
-module GESet = Set.Make (GE)
+module GESet = struct
+  module Internal = Set.Make (GE)
+
+  type t = Set of Internal.t | Total
+
+  let empty = Set Internal.empty
+
+  let mem (x : pattern se) (set : t) =
+    match set with Total -> true | Set s -> Internal.mem x s
+
+  let add (x : pattern se) (set : t) =
+    match (x, set) with
+    | Top, _ -> Total
+    | _, Total -> Total
+    | _, Set s -> Set (Internal.add x s)
+
+  let inter (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> s1
+    | Total, _ -> s2
+    | Set s1, Set s2 -> Set (Internal.inter s1 s2)
+
+  let union (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> Total
+    | Total, _ -> Total
+    | Set s1, Set s2 -> Set (Internal.union s1 s2)
+
+  let diff (s1 : t) (s2 : t) =
+    match (s1, s2) with
+    | _, Total -> Set Internal.empty
+    | Total, _ -> Total
+    | Set s1, Set s2 -> Set (Internal.diff s1 s2)
+
+  let is_empty = function Total -> false | Set s -> Internal.is_empty s
+  let elements = function Total -> [Top] | Set s -> Internal.elements s
+  let of_list l = if List.mem Top l then Total else Set (Internal.of_list l)
+
+  let filter f = function
+    | Total -> if f Top then Total else empty
+    | Set s -> Set (Internal.filter f s)
+
+  let iter f = function Total -> f Top | Set s -> Internal.iter f s
+
+  let fold f set acc =
+    match set with Total -> f Top acc | Set s -> Internal.fold f s acc
+
+  let singleton = function Top -> Total | x -> Set (Internal.singleton x)
+
+  let map f = function
+    | Total ->
+      let elt = f Top in
+      singleton elt
+    | Set s ->
+      let set = Internal.map f s in
+      if Internal.mem Top set then Total else Set set
+end
 
 let update_l l idx =
   match find affected_vars l with
@@ -396,20 +508,19 @@ let update_c key set =
   let sc = find sc context in
   if mem sc key then
     let original = find sc key in
-    if SESet.mem Top original then false
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then false
-      else (
-        if SESet.mem Top diff then replace sc key (SESet.singleton Top)
-        else replace sc key (SESet.union original diff);
-        update_worklist (SESet.add key diff);
-        update_reverse_sc key diff;
-        changed := true;
-        true)
+    let diff = SESet.diff set original in
+    if SESet.is_empty diff then false
+    else (
+      replace sc key (SESet.union original diff);
+      update_worklist (SESet.singleton key);
+      update_worklist diff;
+      update_reverse_sc key diff;
+      changed := true;
+      true)
   else (
     add sc key set;
-    update_worklist (SESet.add key set);
+    update_worklist (SESet.singleton key);
+    update_worklist set;
     update_reverse_sc key set;
     changed := true;
     true)
@@ -424,18 +535,15 @@ let update_loc key set =
   let memory = find memory context in
   if mem memory key then
     let original = find memory key in
-    if SESet.mem Top original then false
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then false
-      else (
-        if SESet.mem Top diff then replace memory key (SESet.singleton Top)
-        else replace memory key (SESet.union original diff);
-        update_worklist diff;
-        consult_affected_vars key;
-        update_reverse_mem key diff;
-        changed := true;
-        true)
+    let diff = SESet.diff set original in
+    if SESet.is_empty diff then false
+    else (
+      replace memory key (SESet.union original diff);
+      update_worklist diff;
+      consult_affected_vars key;
+      update_reverse_mem key diff;
+      changed := true;
+      true)
   else (
     add memory key set;
     update_worklist set;
@@ -450,16 +558,13 @@ let update_g var set =
   let key = Var var in
   if mem grammar key then
     let original = find grammar key in
-    if GESet.mem Top original then false
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then false
-      else (
-        if GESet.mem Top diff then replace grammar key (GESet.singleton Top)
-        else replace grammar key (GESet.union original diff);
-        update_worklist_g key diff;
-        changed := true;
-        true)
+    let diff = GESet.diff set original in
+    if GESet.is_empty diff then false
+    else (
+      replace grammar key (GESet.union original diff);
+      update_worklist_g key diff;
+      changed := true;
+      true)
   else (
     add grammar key set;
     update_worklist_g key set;
@@ -471,16 +576,13 @@ let abs_mem : (loc, GESet.t) t = create 256
 let update_abs_loc key set =
   if mem abs_mem key then
     let original = find abs_mem key in
-    if GESet.mem Top original then false
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then false
-      else (
-        if GESet.mem Top diff then replace abs_mem key (GESet.singleton Top)
-        else replace abs_mem key (GESet.union original diff);
-        consult_affected_vars key;
-        changed := true;
-        true)
+    let diff = GESet.diff set original in
+    if GESet.is_empty diff then false
+    else (
+      replace abs_mem key (GESet.union original diff);
+      consult_affected_vars key;
+      changed := true;
+      true)
   else (
     add abs_mem key set;
     consult_affected_vars key;

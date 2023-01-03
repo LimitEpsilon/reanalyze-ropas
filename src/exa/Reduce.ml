@@ -17,7 +17,7 @@ let rec merge_args = function
 (* filter_pat (p, p') returns (p ∩ p', p - p') *)
 let rec filter_pat = function
   | x, Top -> (GESet.singleton x, GESet.empty)
-  | Top, x -> (GESet.singleton x, GESet.singleton Top)
+  | Top, x -> (GESet.singleton x, GESet.Total)
   | Var x, p ->
     GESet.fold
       (fun y (acc_inter, acc_diff) ->
@@ -119,7 +119,7 @@ let value_prim = function
       },
       _ ) ->
     SESet.empty
-  | _ -> SESet.singleton Top
+  | _ -> SESet.Total
 
 let packet_prim = function
   | {CL.Primitive.prim_name = "%revapply"}, [Some x; Some y] ->
@@ -147,7 +147,7 @@ let resolve_var var elt =
   match elt with
   | Top ->
     let t = Unix.gettimeofday () in
-    update_g var (GESet.singleton Top) |> ignore;
+    update_g var GESet.Total |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
   | Const c ->
     let t = Unix.gettimeofday () in
@@ -180,8 +180,7 @@ let resolve_var var elt =
     if p.prim_arity = arg_len l then (
       let val_prim = value_prim (p, l) in
       update_c (Var var) val_prim |> ignore;
-      if SESet.mem Top val_prim then
-        update_g var (GESet.singleton Top) |> ignore);
+      if SESet.Total = val_prim then update_g var GESet.Total |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
@@ -280,7 +279,7 @@ let resolve_var var elt =
     let t = Unix.gettimeofday () in
     GESet.iter
       (function
-        | Top -> update_g var (GESet.singleton Top) |> ignore
+        | Top -> update_g var GESet.Total |> ignore
         | Ctor_pat (_, l) ->
           let c_set =
             if i < List.length l then
@@ -328,7 +327,7 @@ let resolve_var var elt =
     let t = Unix.gettimeofday () in
     GESet.iter
       (function
-        | Top -> update_g var (GESet.singleton Top) |> ignore
+        | Top -> update_g var GESet.Total |> ignore
         | Ctor_pat (Some k', l) when k = k' ->
           let c_set =
             if i < List.length l then
@@ -448,7 +447,7 @@ let resolve_mem loc elt =
   match elt with
   | Top ->
     let t = Unix.gettimeofday () in
-    update_abs_loc loc (GESet.singleton Top) |> ignore;
+    update_abs_loc loc GESet.Total |> ignore;
     time_spent_in_const := !time_spent_in_const +. (Unix.gettimeofday () -. t)
   | Const c ->
     let t = Unix.gettimeofday () in
@@ -481,8 +480,7 @@ let resolve_mem loc elt =
     if p.prim_arity = arg_len l then (
       let val_prim = value_prim (p, l) in
       update_loc loc val_prim |> ignore;
-      if SESet.mem Top val_prim then
-        update_abs_loc loc (GESet.singleton Top) |> ignore);
+      if val_prim = SESet.Total then update_abs_loc loc GESet.Total |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
@@ -579,7 +577,7 @@ let resolve_mem loc elt =
     let t = Unix.gettimeofday () in
     GESet.iter
       (function
-        | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
+        | Top -> update_abs_loc loc GESet.Total |> ignore
         | Ctor_pat (_, l) ->
           let c_set =
             if i < List.length l then
@@ -627,7 +625,7 @@ let resolve_mem loc elt =
     let t = Unix.gettimeofday () in
     GESet.iter
       (function
-        | Top -> update_abs_loc loc (GESet.singleton Top) |> ignore
+        | Top -> update_abs_loc loc GESet.Total |> ignore
         | Ctor_pat (Some k', l) when k = k' ->
           let c_set =
             if i < List.length l then
