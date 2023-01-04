@@ -115,7 +115,8 @@ let value_prim = function
       [Ctor (Some "true", Static []); Ctor (Some "false", Static [])]
   | ( {
         CL.Primitive.prim_name =
-          "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
+          ( "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace"
+          | "caml_sys_exit" );
       },
       _ ) ->
     SESet.empty
@@ -128,6 +129,8 @@ let packet_prim = function
     SESet.singleton (App_P (x, [Some y]))
   | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
     SESet.singleton (App_P (x, []))
+  | {CL.Primitive.prim_name = "caml_sys_exit"}, _ ->
+    SESet.singleton (Ctor (Some "Exit", Static []))
   | ( {
         CL.Primitive.prim_name =
           "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
