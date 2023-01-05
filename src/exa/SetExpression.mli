@@ -22,11 +22,11 @@ and _ expr =
   | Expr_var : (CL.Ident.t * string) -> param expr
   | Expr : loc -> loc expr
 
-and arr = Static of (loc * CL.Asttypes.mutable_flag) list | Dynamic of loc
+and arr = Static of loc list | Dynamic of loc
 
-and tagged_expr =
-  | Val : _ expr -> tagged_expr
-  | Packet : _ expr -> tagged_expr
+and _ tagged_expr =
+  | Val : 'a expr -> 'a tagged_expr
+  | Packet : 'a expr -> 'a tagged_expr
 
 and ctor = string option
 and fld = ctor * int option
@@ -39,7 +39,7 @@ and _ se =
   | Const : CL.Asttypes.constant -> _ se
   | Prim : CL.Primitive.description -> value se
   | Fn : param * loc expr list -> value se
-  | Var : tagged_expr -> value se
+  | Var : _ tagged_expr -> _ se
   | App_V : value se * arg -> value se
   | App_P : value se * arg -> value se
   | Ctor : ctor * arr -> value se
@@ -47,7 +47,7 @@ and _ se =
   | Arr_pat : loc -> pattern se
   | Fld : value se * fld -> value se
   | Diff : value se * pattern se -> value se
-  | Loc : loc * CL.Asttypes.mutable_flag -> pattern se
+  | Loc : loc * pattern se option -> pattern se
 
 module LocSet : Set.S with type elt = loc
 
@@ -85,7 +85,7 @@ module Worklist : sig
   val prepare_step : t -> t -> unit
 end
 
-val new_array : int -> (loc * CL.Asttypes.mutable_flag) array
+val new_array : int -> loc array
 val loc_of_summary : code_loc -> loc
 val loc_of_mod : CL.Typedtree.module_expr -> loc
 val expr_of_mod : CL.Typedtree.module_expr -> loc expr
@@ -148,7 +148,7 @@ end
 val update_exn_of_file : string -> value se list -> unit
 val update_c : value se -> SESet.t -> bool
 val update_loc : loc -> SESet.t -> bool
-val grammar : (tagged_expr, GESet.t) Hashtbl.t
-val update_g : tagged_expr -> GESet.t -> bool
+val grammar : (pattern se, GESet.t) Hashtbl.t
+val update_g : 'a tagged_expr -> GESet.t -> bool
 val abs_mem : (loc, GESet.t) Hashtbl.t
 val update_abs_loc : loc -> GESet.t -> bool
