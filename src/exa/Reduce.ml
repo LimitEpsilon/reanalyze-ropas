@@ -286,7 +286,7 @@ let resolve_var var elt =
           let g_set =
             if i < List.length l then
               match List.nth l i with
-              | Loc (_, Some p) -> GESet.singleton p
+              | Loc (_, Some p) -> (* print unsafe warning? *) GESet.singleton p
               | Loc (l, None) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
               | p -> GESet.singleton p
