@@ -13,12 +13,14 @@ let se_of_mb (mb : CL.Typedtree.module_binding) =
     let mem = new_memory !current_module in
     update_var id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ([Ctor (Some (CL.Ident.name id), Static [mem])], [packet_of_mod mb_expr])
+    ( [Ctor (Some (CL.Ident.name id), Static [(mem, Immutable)])],
+      [packet_of_mod mb_expr] )
   | ({mb_id; mb_expr} [@if ocaml_version < (4, 10, 0) || defined npm]) ->
     let mem = new_memory !current_module in
     update_var mb_id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ([Ctor (Some (CL.Ident.name mb_id), Static [mem])], [packet_of_mod mb_expr])
+    ( [Ctor (Some (CL.Ident.name mb_id), Static [(mem, Immutable)])],
+      [packet_of_mod mb_expr] )
   | {mb_expr} -> ([], [packet_of_mod mb_expr])
 
 let se_of_vb (vb : CL.Typedtree.value_binding) =
@@ -101,7 +103,7 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
   let for_each_binding acc (name, list) =
     (let mem = new_memory !current_module in
      update_mem mem list;
-     Ctor (Some name, Static [mem]))
+     Ctor (Some name, Static [(mem, Immutable)]))
     :: acc
   in
   let seq_of_bindings = to_seq local_binding in
@@ -390,13 +392,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | Texp_tuple list ->
     let values = list_to_array (val_list list) in
     let mem = new_array (Array.length values) in
-    let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
+    let () = Array.iteri (fun i v -> update_mem (fst mem.(i)) [v]) values in
     let exns = exn_list list in
     ([Ctor (None, Static (Array.to_list mem))], exns)
   | Texp_construct (_, {cstr_name}, list) ->
     let values = list_to_array (val_list list) in
     let mem = new_array (Array.length values) in
-    let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
+    let () = Array.iteri (fun i v -> update_mem (fst mem.(i)) [v]) values in
     let exns = exn_list list in
     ([Ctor (Some cstr_name, Static (Array.to_list mem))], exns)
   | Texp_record {fields; extended_expression} ->
@@ -418,7 +420,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
           update_mem mem [kept]
         | Overridden (_, e) -> update_mem mem [val_of_expr e]
       in
-      mem
+      (mem, l.lbl_mut)
     in
     let acc_exns acc (_, (def : CL.Typedtree.record_label_definition)) =
       match def with Overridden (_, e) -> packet_of_expr e :: acc | _ -> acc
@@ -439,7 +441,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     | Some e ->
       let mem = new_memory !current_module in
       update_mem mem [val_of_expr e];
-      ([Ctor (Some lbl, Static [mem])], [packet_of_expr e])
+      ([Ctor (Some lbl, Static [(mem, Immutable)])], [packet_of_expr e])
     | None -> ([Ctor (Some lbl, Static [])], []))
   | Texp_setfield (e1, _, lbl, e2) ->
     let val1 = val_of_expr e1 in
@@ -452,7 +454,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let for_each_expr_val (expr : CL.Typedtree.expression) =
       let mem = new_memory !current_module in
       update_mem mem [val_of_expr expr];
-      mem
+      (mem, CL.Asttypes.Mutable)
     in
     let arr = list_to_array (List.map for_each_expr_val list) in
     ([Ctor (None, Static (Array.to_list arr))], List.map packet_of_expr list)

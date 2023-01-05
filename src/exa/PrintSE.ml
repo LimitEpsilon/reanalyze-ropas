@@ -1,13 +1,5 @@
 open SetExpression
 
-module Loc = struct
-  type t = loc
-
-  let compare = compare
-end
-
-module LocSet = Set.Make (Loc)
-
 let to_be_explained = ref LocSet.empty
 
 let print_code_loc loc =
@@ -34,7 +26,7 @@ let print_expr : type k. k expr -> unit = function
     print_loc loc;
     prerr_string ")"
 
-let print_tagged_expr : _ tagged_expr -> unit = function
+let print_tagged_expr : tagged_expr -> unit = function
   | Val v ->
     prerr_string "Val (";
     print_expr v;
@@ -121,13 +113,10 @@ and print_pattern : pattern se -> unit = function
     prerr_string "ℓ_";
     print_int i;
     prerr_string ")"
-  | Loc ((i, name), p) -> (
-    match p with
-    | Some p -> print_pattern p
-    | _ ->
-      prerr_string "ℓ_";
-      prerr_int i;
-      to_be_explained := LocSet.add (i, name) !to_be_explained)
+  | Loc ((i, name), _) ->
+    prerr_string "ℓ_";
+    prerr_int i;
+    to_be_explained := LocSet.add (i, name) !to_be_explained
   | _ -> ()
 
 and print_ses (xs : value se list) =
@@ -202,7 +191,7 @@ and print_list_with_separator l sep =
   while !l' <> [] do
     match !l' with
     | hd :: tl ->
-      prerr_int (fst hd);
+      prerr_int (fst (fst hd));
       if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
@@ -272,13 +261,13 @@ let show_sc_tbl (tbl : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t) =
         tbl)
     tbl
 
-let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
+let show_grammar (g : (tagged_expr, GESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
       if GESet.is_empty data then ()
       else (
         prerr_string "grammar :\n";
-        print_pattern key;
+        print_tagged_expr key;
         prerr_string " = ";
         prerr_newline ();
         show_pattern_with_separator data "\t";
@@ -304,7 +293,7 @@ let track_path = ref false
 let rec track_exception (x : value se) (exn : pattern se) =
   let propagate = function
     | Var x -> (
-      let exns = try Hashtbl.find grammar (Var x) with _ -> GESet.empty in
+      let exns = try Hashtbl.find grammar x with _ -> GESet.empty in
       let filter p =
         exn = p
         ||
@@ -367,7 +356,7 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
             (function
               | Var (Packet (Expr loc)) ->
                 let set =
-                  try Hashtbl.find grammar (Var (Packet (Expr loc)))
+                  try Hashtbl.find grammar (Packet (Expr loc))
                   with _ -> GESet.empty
                 in
                 if GESet.is_empty set then ()

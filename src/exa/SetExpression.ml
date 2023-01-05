@@ -27,14 +27,12 @@ and _ expr =
   | Expr : loc -> loc expr
 
 and arr =
-  | Static of loc list
+  | Static of (loc * CL.Asttypes.mutable_flag) list
       (** statically allocated arrays such as records, variants, or tuples *)
   | Dynamic of loc
       (** dynamically allocated array, decoded from the Prim set expression *)
 
-and _ tagged_expr =
-  | Val : 'a expr -> 'a tagged_expr
-  | Packet : 'a expr -> 'a tagged_expr
+and tagged_expr = Val : _ expr -> tagged_expr | Packet : _ expr -> tagged_expr
 
 and ctor = string option
 (** variant : Some Types.cstr_name
@@ -59,7 +57,7 @@ and _ se =
   | Prim : CL.Primitive.description -> value se
       (** primitives, later converted to arith/rel/fld/mem *)
   | Fn : param * loc expr list -> value se  (** lambda expression *)
-  | Var : _ tagged_expr -> _ se  (** set variable *)
+  | Var : tagged_expr -> value se  (** set variable *)
   | App_V : value se * arg -> value se
       (** possible values / force when arg = nil / prim_v when lhs is Prim *)
   | App_P : value se * arg -> value se
@@ -70,7 +68,7 @@ and _ se =
   | Arr_pat : loc -> pattern se
   | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
   | Diff : value se * pattern se -> value se  (** screening *)
-  | Loc : loc * pattern se option -> pattern se
+  | Loc : loc * CL.Asttypes.mutable_flag -> pattern se
 
 (* divide_by_zero : check denominator, if constant check if zero.
                   : if identifier look up in var_to_se to check if constant
@@ -117,7 +115,7 @@ let new_memory mod_name =
 
 let new_array size =
   let arr = Array.make size !current_module in
-  Array.map new_memory arr
+  Array.map (fun s -> (new_memory s, CL.Asttypes.Immutable)) arr
 
 module SE = struct
   type t = value se
@@ -487,11 +485,9 @@ let update_l l idx =
     add affected_vars l new_tbl
   | original -> Worklist.add idx original
 
-let update_worklist_g key set =
-  let for_each_loc = function
-    | Loc (l, None) -> update_l l (hash key)
-    | _ -> ()
-  in
+let update_worklist_g var set =
+  let key = Var var in
+  let for_each_loc = function Loc (l, _) -> update_l l (hash key) | _ -> () in
   let summarize = function
     | Ctor_pat (_, arr) -> List.iter for_each_loc arr
     | Arr_pat l -> update_l l (hash key)
@@ -552,22 +548,21 @@ let update_loc key set =
     changed := true;
     true)
 
-let grammar : (pattern se, GESet.t) t = create 256
+let grammar : (tagged_expr, GESet.t) t = create 256
 
 let update_g var set =
-  let key = Var var in
-  if mem grammar key then
-    let original = find grammar key in
+  if mem grammar var then
+    let original = find grammar var in
     let diff = GESet.diff set original in
     if GESet.is_empty diff then false
     else (
-      replace grammar key (GESet.union original diff);
-      update_worklist_g key diff;
+      replace grammar var (GESet.union original diff);
+      update_worklist_g var diff;
       changed := true;
       true)
   else (
-    add grammar key set;
-    update_worklist_g key set;
+    add grammar var set;
+    update_worklist_g var set;
     changed := true;
     true)
 
