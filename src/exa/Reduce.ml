@@ -56,6 +56,11 @@ and filter_list ((rev_hd : pattern se list list), tl) tl' =
     (inter_total, diff_total)
   | _ -> assert false
 
+let filter_closure = function
+  | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
+  | App_V (Prim p, l) -> if p.prim_arity <> arg_len l then true else false
+  | _ -> false
+
 let allocated = Hashtbl.create 10
 
 let value_prim = function
@@ -152,12 +157,7 @@ let resolve_var var elt =
   | Var x when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let c_set =
-      SESet.filter
-        (function
-          | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-          | App_V (Prim p, l) ->
-            if arg_len l < p.prim_arity then true else false
-          | _ -> false)
+      SESet.filter filter_closure
         (try lookup_sc (Var x) with _ -> SESet.empty)
     in
     let g_set = try Hashtbl.find grammar x with Not_found -> GESet.empty in
@@ -274,12 +274,7 @@ let resolve_var var elt =
             let c_set =
               match List.nth l i with
               | Loc (l, _) ->
-                SESet.filter
-                  (function
-                    | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                    | App_V (Prim p, l) ->
-                      if p.prim_arity <> arg_len l then true else false
-                    | _ -> false)
+                SESet.filter filter_closure
                   (try lookup_mem l with _ -> SESet.empty)
               | _ -> SESet.empty
             in
@@ -291,15 +286,9 @@ let resolve_var var elt =
             in
             update_c (Var var) c_set |> ignore;
             update_g var g_set |> ignore)
-          else ()
         | Arr_pat l ->
           let c_set =
-            SESet.filter
-              (function
-                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                | App_V (Prim p, l) ->
-                  if p.prim_arity <> arg_len l then true else false
-                | _ -> false)
+            SESet.filter filter_closure
               (try lookup_mem l with _ -> SESet.empty)
           in
           let g_set = try Hashtbl.find abs_mem l with _ -> GESet.empty in
@@ -319,12 +308,7 @@ let resolve_var var elt =
             let c_set =
               match List.nth l i with
               | Loc (l, _) ->
-                SESet.filter
-                  (function
-                    | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                    | App_V (Prim p, l) ->
-                      if p.prim_arity <> arg_len l then true else false
-                    | _ -> false)
+                SESet.filter filter_closure
                   (try lookup_mem l with _ -> SESet.empty)
               | _ -> SESet.empty
             in
@@ -336,17 +320,15 @@ let resolve_var var elt =
             in
             update_c (Var var) c_set |> ignore;
             update_g var g_set |> ignore)
-          else ()
         | _ -> ())
       (try Hashtbl.find grammar x with _ -> GESet.empty);
     time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
   | Diff (Var x, p) when Worklist.mem (hash (Var x)) prev_worklist ->
     let t = Unix.gettimeofday () in
     let () =
-      if !Common.Cli.debug_pat then
-        match x with
-        | Val (Expr_var (x, _)) -> prerr_endline (CL.Ident.name x)
-        | _ -> ()
+      if !Common.Cli.debug_pat then (
+        PrintSE.print_tagged_expr x;
+        prerr_newline ())
     in
     let filtered =
       GESet.fold
@@ -426,12 +408,7 @@ let resolve_mem loc elt =
   | Var x when Worklist.mem (hash elt) prev_worklist ->
     let t = Unix.gettimeofday () in
     let c_set =
-      SESet.filter
-        (function
-          | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-          | App_V (Prim p, l) ->
-            if arg_len l < p.prim_arity then true else false
-          | _ -> false)
+      SESet.filter filter_closure
         (try lookup_sc (Var x) with _ -> SESet.empty)
     in
     let g_set = try Hashtbl.find grammar x with Not_found -> GESet.empty in
@@ -542,38 +519,25 @@ let resolve_mem loc elt =
       (function
         | Top -> update_abs_loc loc GESet.Total |> ignore
         | Ctor_pat (_, l) ->
-          let c_set =
-            if i < List.length l then
+          if i < List.length l then (
+            let c_set =
               match List.nth l i with
               | Loc (l, _) ->
-                SESet.filter
-                  (function
-                    | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                    | App_V (Prim p, l) ->
-                      if p.prim_arity <> arg_len l then true else false
-                    | _ -> false)
+                SESet.filter filter_closure
                   (try lookup_mem l with _ -> SESet.empty)
               | _ -> SESet.empty
-            else SESet.empty
-          in
-          let g_set =
-            if i < List.length l then
+            in
+            let g_set =
               match List.nth l i with
               | Loc (l, _) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
               | p -> GESet.singleton p
-            else GESet.empty
-          in
-          update_loc loc c_set |> ignore;
-          update_abs_loc loc g_set |> ignore
+            in
+            update_loc loc c_set |> ignore;
+            update_abs_loc loc g_set |> ignore)
         | Arr_pat l ->
           let c_set =
-            SESet.filter
-              (function
-                | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                | App_V (Prim p, l) ->
-                  if p.prim_arity <> arg_len l then true else false
-                | _ -> false)
+            SESet.filter filter_closure
               (try lookup_mem l with _ -> SESet.empty)
           in
           let g_set = try Hashtbl.find abs_mem l with _ -> GESet.empty in
@@ -589,30 +553,22 @@ let resolve_mem loc elt =
       (function
         | Top -> update_abs_loc loc GESet.Total |> ignore
         | Ctor_pat (Some k', l) when k = k' ->
-          let c_set =
-            if i < List.length l then
+          if i < List.length l then (
+            let c_set =
               match List.nth l i with
               | Loc (l, _) ->
-                SESet.filter
-                  (function
-                    | Prim _ | Fn (_, _) | App_V (_, None :: _) -> true
-                    | App_V (Prim p, l) ->
-                      if p.prim_arity <> arg_len l then true else false
-                    | _ -> false)
+                SESet.filter filter_closure
                   (try lookup_mem l with _ -> SESet.empty)
               | _ -> SESet.empty
-            else SESet.empty
-          in
-          let g_set =
-            if i < List.length l then
+            in
+            let g_set =
               match List.nth l i with
               | Loc (l, _) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
               | p -> GESet.singleton p
-            else GESet.empty
-          in
-          update_loc loc c_set |> ignore;
-          update_abs_loc loc g_set |> ignore
+            in
+            update_loc loc c_set |> ignore;
+            update_abs_loc loc g_set |> ignore)
         | _ -> ())
       (try Hashtbl.find grammar x with _ -> GESet.empty);
     time_spent_in_fld := !time_spent_in_fld +. (Unix.gettimeofday () -. t)
