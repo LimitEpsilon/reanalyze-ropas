@@ -1,3 +1,5 @@
+[%%import "../config.h"]
+
 let processCallee ~env ~funDef ~loc callee =
   match callee with
   | CL.Path.Pident id -> (
@@ -216,7 +218,11 @@ and processExpr ~funDef ~env ~mem (expr : CL.Typedtree.expression) =
     fields
     |> Array.iteri (fun i (_ld, (rld : CL.Typedtree.record_label_definition)) ->
            match rld with
-           | Kept _ -> assert false
+           | ((Kept _) [@if ocaml_version < (5, 0, 0) || defined npm]) ->
+             assert false
+           | ((Kept (_, _)) [@if ocaml_version >= (5, 0, 0) && not_defined npm])
+             ->
+             assert false
            | Overridden ({loc}, e) ->
              let size = e.exp_type |> sizeOfTyp ~loc in
              let index = mem |> Il.Mem.alloc ~size in
@@ -265,7 +271,6 @@ let rec processGlobal ~env ~id ~mem (expr : CL.Typedtree.expression) =
     assert false
 
 let envRef = ref (Il.Env.create ())
-
 let memRef = ref (Il.Mem.create ())
 
 let processValueBinding ~id ~(expr : CL.Typedtree.expression) =

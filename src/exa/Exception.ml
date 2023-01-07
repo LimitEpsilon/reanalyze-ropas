@@ -1,12 +1,13 @@
-[%%import "../config.h"]
+[%%import "../../config.h"]
 
 open CL
 open SetExpression
+open GenerateConstraints
 open Reduce
 
 let rec resolve_path (path : Path.t) (context : string) =
   match path with
-  | Pident x -> se_of_var x
+  | Pident x -> se_of_var x context
   | ((Pdot (m, x, _)) [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let m_temp = Var (Val (new_temp_var context)) in
     let m = resolve_path m context in
@@ -28,11 +29,14 @@ let rec resolve_path (path : Path.t) (context : string) =
 
 let resolve_to_be_resolved () =
   let resolve loc (path, context) =
-    try update_sc (Var (Val (Expr loc))) (resolve_path path context)
+    let var = Var (Val (Expr loc)) in
+    try
+      update_sc var (resolve_path path context);
+      Hashtbl.remove to_be_resolved loc
     with _ ->
-      if !Common.Cli.debug then (
+      if !Common.Cli.debug && !linking then (
         let loc =
-          match loc with
+          match Hashtbl.find label_to_summary loc with
           | Expr_loc e -> e.exp_loc
           | Mod_loc m -> m.mod_loc
           | Bop_loc t -> t.val_loc
@@ -72,15 +76,20 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   let filename =
     match cmt_infos.cmt_sourcefile with None -> "" | Some s -> s
   in
-  match cmt_infos.cmt_annots with
-  | Interface _ -> ()
-  | Implementation structure ->
-    let v, p = se_of_struct structure in
-    current_file := Hashtbl.create 10;
-    update_var id v;
-    update_exn_of_file filename p;
-    structure |> process_structure
-  | _ -> ()
+  let () =
+    match cmt_infos.cmt_annots with
+    | Interface _ -> ()
+    | Implementation structure ->
+      let v, p = se_of_struct structure in
+      update_var id v;
+      update_exn_of_file filename p;
+      structure |> process_structure
+    | _ -> ()
+  in
+  linking := false;
+  resolve_to_be_resolved ();
+  solve !current_module;
+  ()
 
 let print_time () =
   prerr_endline @@ "Time spent in variable propagation: "
@@ -97,8 +106,9 @@ let print_time () =
   ^ string_of_float !time_spent_in_const
 
 let reportResults ~ppf:_ =
-  resolve_to_be_resolved ();
-  solve ();
+  linking := true;
+  resolve_to_be_resolved () (* linking *);
+  solve "" (* linking *);
   if !Common.Cli.closure then PrintSE.print_closure () else PrintSE.print_exa ();
   if !Common.Cli.debug_time then print_time () else ();
   if !Common.Cli.debug then PrintSE.print_grammar ()

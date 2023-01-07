@@ -1,273 +1,7 @@
-[%%import "../config.h"]
+[%%import "../../config.h"]
 
-type expr_summary = {
-  exp_type : CL.Types.type_expr;
-  exp_loc : CL.Location.t;
-  exp_context : string;
-}
-
-type mod_summary = {
-  mod_type : CL.Types.module_type;
-  mod_loc : CL.Location.t;
-  mod_context : string;
-}
-
-type code_loc =
-  | Expr_loc of expr_summary
-  | Mod_loc of mod_summary
-  | Bop_loc of CL.Types.value_description
-
-and param = (CL.Ident.t * string) option (* use Texp_function's param *)
-and arg = value se option list
-
-and _ expr =
-  | Expr_var : (CL.Ident.t * string) -> param expr (* record the file *)
-  | Expr : code_loc -> code_loc expr
-
-and arr =
-  | Static of loc array
-      (** statically allocated arrays such as records, variants, or tuples *)
-  | Dynamic of loc
-      (** dynamically allocated array, decoded from the Prim set expression *)
-
-and _ tagged_expr =
-  | Val : 'a expr -> 'a tagged_expr
-  | Packet : 'a expr -> 'a tagged_expr
-
-and ctor = string option
-(** variant : Some Types.cstr_name
-    polymorphic variant : Some Asttypes.label
-    tuple or record or array : None *)
-
-and fld = ctor * int option
-(** i-th field of a variant : (Some κ, Some i)
-    i-th field of a tuple or record : (None, Some i)
-    dynamic access through the Array.get primitive : (None, None) *)
-
-and arith =
-  | ADD
-  | SUB
-  | DIV
-  | MUL
-  | NEG
-  | ABS  (** absolute value *)
-  | MOD
-  | AND
-  | OR
-  | NOT
-  | XOR
-  | LSL  (** <<, logical *)
-  | LSR  (** >>, logical *)
-  | ASR  (** >>, arithmetic sign extension *)
-  | SUCC  (** ++x *)
-  | PRED  (** --x *)
-
-and rel =
-  | EQ  (** == *)
-  | NE  (** <> *)
-  | LT  (** < *)
-  | LE  (** <= *)
-  | GT  (** > *)
-  | GE  (** >= *)
-
-and arithop =
-  | INT of arith
-  | INT32 of arith
-  | INT64 of arith
-  | FLOAT of arith
-  | NATURALINT of arith
-
-and relop = GEN of rel
-and pattern
-(* phantom type for pattern screening *)
-
-and value
-and loc = int * string (* records the file the address belongs to *)
-
-(** set expression type *)
-and _ se =
-  | Top : _ se  (** _ *)
-  | Const : CL.Asttypes.constant -> _ se
-  | Prim : CL.Primitive.description -> value se
-      (** primitives, later converted to arith/rel/fld/mem *)
-  | Fn : param * code_loc expr list -> value se  (** lambda expression *)
-  | Var : _ tagged_expr -> _ se  (** set variable *)
-  | App_V : value se * arg -> value se
-      (** possible values / force when arg = nil / prim_v when lhs is Prim *)
-  | App_P : value se * arg -> value se
-      (** possible exn packets / force when arg = nil / prim_p when lhs is Prim *)
-  | Ctor : ctor * arr -> value se  (** One ADT to rule them all :D *)
-  | Ctor_pat : ctor * pattern se array -> pattern se
-      (** For pattern screening *)
-  | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
-  | Arith : arithop * value se list -> value se  (** arithmetic operators *)
-  | Rel : relop * value se list -> value se  (** relation operators *)
-  | Diff : value se * pattern se -> value se  (** screening *)
-  | Loc : loc * pattern se option -> pattern se
-
-(* divide_by_zero : check denominator, if constant check if zero.
-                  : if identifier look up in var_to_se to check if constant
-                  : if constant check if zero, else mark might_raise *)
-
-let current_module = ref ""
-let temp_variable_label : (string, int) Hashtbl.t = Hashtbl.create 10
-
-let new_temp_var mod_name =
-  let temp =
-    match Hashtbl.find temp_variable_label mod_name with
-    | exception Not_found ->
-      Hashtbl.add temp_variable_label mod_name 0;
-      0
-    | lbl ->
-      Hashtbl.remove temp_variable_label mod_name;
-      Hashtbl.add temp_variable_label mod_name (lbl + 1);
-      lbl + 1
-  in
-  let temp_id =
-    CL.Ident.create_persistent (mod_name ^ "__temp" ^ string_of_int temp)
-  in
-  Expr_var (temp_id, mod_name)
-
-let address : (string, int) Hashtbl.t = Hashtbl.create 10
-
-let new_memory mod_name =
-  let mem =
-    match Hashtbl.find address mod_name with
-    | exception Not_found ->
-      Hashtbl.add address mod_name 0;
-      0
-    | addr ->
-      Hashtbl.remove address mod_name;
-      Hashtbl.add address mod_name (addr + 1);
-      addr + 1
-  in
-  (mem, mod_name)
-
-let new_array size =
-  let arr = Array.make size !current_module in
-  Array.map new_memory arr
-
-module SE = struct
-  type t = value se
-
-  let compare = compare
-end
-
-module SESet = Set.Make (SE)
-module Worklist = Set.Make (Int)
-
-let worklist = ref Worklist.empty
-let reverse_mem : (loc, Worklist.t) Hashtbl.t = Hashtbl.create 10
-let current_file : (CL.Ident.t, SESet.t) Hashtbl.t ref = ref (Hashtbl.create 10)
-let sc : (value se, SESet.t) Hashtbl.t = Hashtbl.create 256
-let hash = Hashtbl.hash
-
-let update_worklist set =
-  let summarize = function
-    | App_V (x, _) | App_P (x, _) -> worklist := Worklist.add (hash x) !worklist
-    | Var x -> worklist := Worklist.add (hash (Var x)) !worklist
-    | Ctor (kappa, arr) ->
-      worklist := Worklist.add (hash (Ctor (kappa, arr))) !worklist
-    | _ -> ()
-  in
-  SESet.iter summarize set
-
-let update_sc key data =
-  let set = SESet.of_list data in
-  update_worklist set;
-  if Hashtbl.mem sc key then (
-    let original = Hashtbl.find sc key in
-    Hashtbl.remove sc key;
-    Hashtbl.add sc key (SESet.union original set))
-  else (
-    Hashtbl.add sc key set;
-    update_worklist (SESet.singleton key))
-
-type var_se_tbl = (CL.Ident.t, SESet.t) Hashtbl.t
-
-let var_to_se : var_se_tbl = Hashtbl.create 256
-
-let update_var key data =
-  let set = SESet.of_list data in
-  Hashtbl.add !current_file key set;
-  if Hashtbl.mem var_to_se key then (
-    let original = Hashtbl.find var_to_se key in
-    Hashtbl.remove var_to_se key;
-    Hashtbl.add var_to_se key (SESet.union original set))
-  else Hashtbl.add var_to_se key set
-
-type to_be_resolved = (code_loc, CL.Path.t * string) Hashtbl.t
-
-let to_be_resolved : to_be_resolved = Hashtbl.create 256
-
-let update_to_be key data =
-  Hashtbl.add to_be_resolved key (data, !current_module)
-
-let mem : (loc, SESet.t) Hashtbl.t = Hashtbl.create 256
-
-let update_mem key data =
-  let set = SESet.of_list data in
-  if Hashtbl.mem mem key then (
-    let original = Hashtbl.find mem key in
-    Hashtbl.remove mem key;
-    Hashtbl.add mem key (SESet.union original set))
-  else Hashtbl.add mem key set
-
-let list_to_array l =
-  let len = List.length l in
-  if len = 0 then [||]
-  else
-    let arr = Array.make len (List.hd l) in
-    let i = ref 0 in
-    let l = ref l in
-    while !l <> [] do
-      match !l with
-      | hd :: tl ->
-        arr.(!i) <- hd;
-        incr i;
-        l := tl
-      | _ -> assert false
-    done;
-    arr
-
-let se_of_var x =
-  let se_list =
-    try SESet.elements (Hashtbl.find var_to_se x)
-    with err ->
-      if !Common.Cli.debug then
-        prerr_string
-          ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
-      raise err
-  in
-  se_list
-
-let loc_of_mod mod_expr =
-  let summary =
-    {
-      mod_type = mod_expr.CL.Typedtree.mod_type;
-      mod_loc = mod_expr.CL.Typedtree.mod_loc;
-      mod_context = !current_module;
-    }
-  in
-  Mod_loc summary
-
-let expr_of_mod me = Expr (loc_of_mod me)
-let val_of_mod me = Var (Val (expr_of_mod me))
-let packet_of_mod me = Var (Packet (expr_of_mod me))
-
-let loc_of_expr expr =
-  let summary =
-    {
-      exp_type = expr.CL.Typedtree.exp_type;
-      exp_loc = expr.CL.Typedtree.exp_loc;
-      exp_context = !current_module;
-    }
-  in
-  Expr_loc summary
-
-let expr_of_expr e = Expr (loc_of_expr e)
-let val_of_expr e = Var (Val (expr_of_expr e))
-let packet_of_expr e = Var (Packet (expr_of_expr e))
+open Hashtbl
+open SetExpression
 
 (** se_of_something returns (value_of_something, packet_of_something) *)
 
@@ -279,24 +13,23 @@ let se_of_mb (mb : CL.Typedtree.module_binding) =
     let mem = new_memory !current_module in
     update_var id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ([Ctor (Some (CL.Ident.name id), Static [|mem|])], [packet_of_mod mb_expr])
+    ([Ctor (Some (CL.Ident.name id), Static [mem])], [packet_of_mod mb_expr])
   | ({mb_id; mb_expr} [@if ocaml_version < (4, 10, 0) || defined npm]) ->
     let mem = new_memory !current_module in
     update_var mb_id [val_of_mod mb_expr];
     update_mem mem [val_of_mod mb_expr];
-    ( [Ctor (Some (CL.Ident.name mb_id), Static [|mem|])],
-      [packet_of_mod mb_expr] )
+    ([Ctor (Some (CL.Ident.name mb_id), Static [mem])], [packet_of_mod mb_expr])
   | {mb_expr} -> ([], [packet_of_mod mb_expr])
 
 let se_of_vb (vb : CL.Typedtree.value_binding) =
-  let local_binding : (string, value se list) Hashtbl.t = Hashtbl.create 10 in
+  let local_binding : (string, value se list) t = create 10 in
   (* update the table *)
   let update_tbl key data =
-    if Hashtbl.mem local_binding key then (
-      let original = Hashtbl.find local_binding key in
-      Hashtbl.remove local_binding key;
-      Hashtbl.add local_binding key (data :: original))
-    else Hashtbl.add local_binding key [data]
+    if mem local_binding key then (
+      let original = find local_binding key in
+      remove local_binding key;
+      add local_binding key (data :: original))
+    else add local_binding key [data]
   in
   (* update the table while traversing the pattern *)
   let rec solve_eq (pat : CL.Typedtree.pattern) se =
@@ -368,10 +101,10 @@ let se_of_vb (vb : CL.Typedtree.value_binding) =
   let for_each_binding acc (name, list) =
     (let mem = new_memory !current_module in
      update_mem mem list;
-     Ctor (Some name, Static [|mem|]))
+     Ctor (Some name, Static [mem]))
     :: acc
   in
-  let seq_of_bindings = Hashtbl.to_seq local_binding in
+  let seq_of_bindings = to_seq local_binding in
   let ctor_list = Seq.fold_left for_each_binding [] seq_of_bindings in
   (ctor_list, [packet_of_expr vb.vb_expr])
 
@@ -467,13 +200,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       let constructor = Some lbl in
       match p_o with
       | None ->
-        [Ctor_pat (constructor, [||])]
+        [Ctor_pat (constructor, [])]
         (* give up on being consistent with the actual mem repr *)
       | Some p ->
         let temp = Var (Val (new_temp_var !current_module)) in
         update_sc temp [Fld (se, (constructor, Some 0))];
         let sub = solve_eq p temp in
-        List.map (fun x -> Ctor_pat (constructor, [|x|])) sub)
+        List.map (fun x -> Ctor_pat (constructor, [x])) sub)
     | Tpat_record (key_val_list, _) ->
       let list =
         List.map (fun (_, lbl, pat) -> (lbl.CL.Types.lbl_pos, pat)) key_val_list
@@ -514,7 +247,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
             [] acc)
         [[]] !args
     in
-    List.map (fun l -> Ctor_pat (constructor, list_to_array l)) flattened
+    List.map (fun l -> Ctor_pat (constructor, l)) flattened
   and solve_rec len se list =
     (* Solve `list = se` and return the set expression of the list
        For example, `list [x, y, z] = se` should return [T, T, T] and
@@ -550,7 +283,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
             [] acc)
         [[]] !args
     in
-    List.map (fun l -> Ctor_pat (None, list_to_array l)) flattened
+    List.map (fun l -> Ctor_pat (None, l)) flattened
   in
   (* solves p_i = acc, that is, p_1 = se; p_2 = se - p_1; ... *)
   let solve_param (acc : value se) (pattern, guarded) : value se =
@@ -638,12 +371,6 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let p = List.flatten p in
     ([val_of_expr e], packet_of_expr e :: p)
   | Texp_ident (_, _, {val_kind = Val_prim prim}) -> ([Prim prim], [])
-  | Texp_ident (CL.Path.Pident x, _, _) -> (
-    match Hashtbl.find !current_file x with
-    | set -> (SESet.elements set, [])
-    | exception Not_found ->
-      update_to_be (loc_of_expr expr) (Pident x);
-      ([], []))
   | Texp_ident (x, _, _) ->
     update_to_be (loc_of_expr expr) x;
     ([], [])
@@ -665,13 +392,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     let mem = new_array (Array.length values) in
     let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
     let exns = exn_list list in
-    ([Ctor (None, Static mem)], exns)
+    ([Ctor (None, Static (Array.to_list mem))], exns)
   | Texp_construct (_, {cstr_name}, list) ->
     let values = list_to_array (val_list list) in
     let mem = new_array (Array.length values) in
     let () = Array.iteri (fun i v -> update_mem mem.(i) [v]) values in
     let exns = exn_list list in
-    ([Ctor (Some cstr_name, Static mem)], exns)
+    ([Ctor (Some cstr_name, Static (Array.to_list mem))], exns)
   | Texp_record {fields; extended_expression} ->
     let for_each_field
         ( (l : CL.Types.label_description),
@@ -685,7 +412,10 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       in
       let () =
         match def with
-        | Kept _ -> update_mem mem [kept]
+        | ((Kept _) [@if ocaml_version < (5, 0, 0) || defined npm]) ->
+          update_mem mem [kept]
+        | ((Kept (_, _)) [@if ocaml_version >= (5, 0, 0) && not_defined npm]) ->
+          update_mem mem [kept]
         | Overridden (_, e) -> update_mem mem [val_of_expr e]
       in
       mem
@@ -699,7 +429,8 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       | Some e -> packet_of_expr e :: exns
       | _ -> exns
     in
-    ([Ctor (None, Static (Array.map for_each_field fields))], exns)
+    ( [Ctor (None, Static (Array.to_list (Array.map for_each_field fields)))],
+      exns )
   | Texp_field (e, _, lbl) ->
     let i = lbl.lbl_pos in
     ([Fld (val_of_expr e, (None, Some i))], [packet_of_expr e])
@@ -708,15 +439,15 @@ let se_of_expr (expr : CL.Typedtree.expression) =
     | Some e ->
       let mem = new_memory !current_module in
       update_mem mem [val_of_expr e];
-      ([Ctor (Some lbl, Static [|mem|])], [packet_of_expr e])
-    | None -> ([Ctor (Some lbl, Static [||])], []))
+      ([Ctor (Some lbl, Static [mem])], [packet_of_expr e])
+    | None -> ([Ctor (Some lbl, Static [])], []))
   | Texp_setfield (e1, _, lbl, e2) ->
     let val1 = val_of_expr e1 in
     let val2 = val_of_expr e2 in
     let exn1 = packet_of_expr e1 in
     let exn2 = packet_of_expr e2 in
     update_sc (Fld (val1, (None, Some lbl.lbl_pos))) [val2];
-    ([Ctor (Some "()", Static [||])], [exn1; exn2])
+    ([Ctor (Some "()", Static [])], [exn1; exn2])
   | Texp_array list ->
     let for_each_expr_val (expr : CL.Typedtree.expression) =
       let mem = new_memory !current_module in
@@ -724,7 +455,7 @@ let se_of_expr (expr : CL.Typedtree.expression) =
       mem
     in
     let arr = list_to_array (List.map for_each_expr_val list) in
-    ([Ctor (None, Static arr)], List.map packet_of_expr list)
+    ([Ctor (None, Static (Array.to_list arr))], List.map packet_of_expr list)
   | Texp_ifthenelse (pred, if_true, Some if_false) ->
     let val1 = val_of_expr if_true in
     let val2 = val_of_expr if_false in
@@ -737,13 +468,13 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | Texp_sequence (e1, e2) ->
     ([val_of_expr e2], [packet_of_expr e1; packet_of_expr e2])
   | Texp_while (pred, body) ->
-    ([Ctor (Some "()", Static [||])], [packet_of_expr pred; packet_of_expr body])
+    ([Ctor (Some "()", Static [])], [packet_of_expr pred; packet_of_expr body])
   | Texp_for (i, _, start, finish, _, body) ->
     let exn_start = packet_of_expr start in
     let exn_finish = packet_of_expr finish in
     let exn_body = packet_of_expr body in
     update_var i [Top];
-    ([Ctor (Some "()", Static [||])], [exn_start; exn_finish; exn_body])
+    ([Ctor (Some "()", Static [])], [exn_start; exn_finish; exn_body])
   | ((Texp_letmodule (x, _, mod_loc, exp_loc))
   [@if ocaml_version < (4, 08, 0) || defined npm]) ->
     let val_m = val_of_mod mod_loc in
@@ -779,30 +510,39 @@ let se_of_expr (expr : CL.Typedtree.expression) =
   | Texp_letexception (_, exp) -> ([val_of_expr exp], [packet_of_expr exp])
   | Texp_assert exp ->
     (* How to express Assert_failure... *)
-    ([], [Ctor (Some "Assert_failure", Static [||]); packet_of_expr exp])
+    ([], [Ctor (Some "Assert_failure", Static []); packet_of_expr exp])
   | Texp_lazy exp -> ([Fn (None, [expr_of_expr exp])], [])
   | Texp_pack m -> ([val_of_mod m], [packet_of_mod m])
-  | ((Texp_letop {let_; ands; body})
+  | ((Texp_letop {let_; ands; param; body})
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let let_path = let_.bop_op_path in
-    let letop = Var (Val (Expr (Bop_loc let_.bop_op_val))) in
+    let let_loc = loc_of_summary (Bop_loc let_.bop_op_val) in
+    let letop = Var (Val (Expr let_loc)) in
     let bound = (val_of_expr let_.bop_exp, [packet_of_expr let_.bop_exp]) in
-    let for_each_and (acc_val, acc_exn_list) (andop : CL.Typedtree.binding_op) =
-      let and_path = andop.bop_op_path in
-      let and_val = Var (Val (Expr (Bop_loc andop.bop_op_val))) in
-      let bound_val = val_of_expr andop.bop_exp in
-      let exn = packet_of_expr andop.bop_exp in
-      let updated_val = App_V (and_val, [Some acc_val; Some bound_val]) in
-      update_to_be (Bop_loc andop.bop_op_val) and_path;
-      (updated_val, exn :: acc_exn_list)
+    let for_each_and (acc_val, acc_exn_list) (and_ : CL.Typedtree.binding_op) =
+      let and_path = and_.bop_op_path in
+      let and_loc = loc_of_summary (Bop_loc and_.bop_op_val) in
+      let andop = Var (Val (Expr and_loc)) in
+      let bound_val = val_of_expr and_.bop_exp in
+      let exn = packet_of_expr and_.bop_exp in
+      let exn_app = App_P (andop, [Some acc_val; Some bound_val]) in
+      let temp = new_temp_var !current_module in
+      let updated_val = App_V (andop, [Some acc_val; Some bound_val]) in
+      update_sc (Var (Val temp)) [updated_val];
+      update_to_be and_loc and_path;
+      (Var (Val temp), exn_app :: exn :: acc_exn_list)
     in
     let bound_expr, exns = List.fold_left for_each_and bound ands in
-    let (Expr_var temp) = new_temp_var !current_module in
+    let temp = (param, !current_module) in
     let body_fn = Fn (Some temp, [expr_of_expr body.c_rhs]) in
-    let value = App_V (letop, [Some bound_expr; Some body_fn]) in
-    let exn = App_P (letop, [Some bound_expr; Some body_fn]) in
+    let temp_fn = Var (Val (new_temp_var !current_module)) in
+    let value =
+      update_sc temp_fn [body_fn];
+      App_V (letop, [Some bound_expr; Some temp_fn])
+    in
+    let exn = App_P (letop, [Some bound_expr; Some temp_fn]) in
     solve_eq body.c_lhs (Var (Val (Expr_var temp))) |> ignore;
-    update_to_be (Bop_loc let_.bop_op_val) let_path;
+    update_to_be let_loc let_path;
     ([value], exn :: exns)
   | ((Texp_open (_, exp)) [@if ocaml_version >= (4, 08, 0) && not_defined npm])
     ->
@@ -814,136 +554,3 @@ let se_of_expr (expr : CL.Typedtree.expression) =
 (* tast_mapper connects val/exns returned by se_of_something with the code_loc of the AST node *)
 (* var_to_se) correlates ident to se set_constraints) correlates location to se *)
 (* after all cmt files are processed, lookup to_be_resolved to resolve Path.t. *)
-
-(* for resolution *)
-let changed = ref false
-let prev_worklist = ref Worklist.empty
-let exn_of_file = Hashtbl.create 10
-
-module GE = struct
-  type t = pattern se
-
-  let compare = compare
-end
-
-module GESet = Set.Make (GE)
-
-let update_worklist_g key set =
-  let update_l = function
-    | Loc (l, None) -> (
-      match Hashtbl.find reverse_mem l with
-      | exception Not_found ->
-        Hashtbl.add reverse_mem l (Worklist.singleton (hash key))
-      | original ->
-        Hashtbl.remove reverse_mem l;
-        Hashtbl.add reverse_mem l (Worklist.add (hash key) original))
-    | _ -> ()
-  in
-  let summarize = function
-    | Ctor_pat (_, arr) -> Array.iter update_l arr
-    | _ -> ()
-  in
-  GESet.iter summarize set;
-  worklist := Worklist.add (hash key) !worklist
-
-let update_exn_of_file (key : string) (data : value se list) =
-  Hashtbl.add exn_of_file key data
-
-let update_c key set =
-  if Hashtbl.mem sc key then
-    let original = Hashtbl.find sc key in
-    if SESet.mem Top original then false
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then false
-      else (
-        Hashtbl.remove sc key;
-        if SESet.mem Top diff then Hashtbl.add sc key (SESet.singleton Top)
-        else Hashtbl.add sc key (SESet.union original diff);
-        update_worklist (SESet.add key diff);
-        changed := true;
-        true)
-  else (
-    Hashtbl.add sc key set;
-    update_worklist (SESet.add key set);
-    changed := true;
-    true)
-
-let update_loc key set =
-  if Hashtbl.mem mem key then
-    let original = Hashtbl.find mem key in
-    if SESet.mem Top original then false
-    else
-      let diff = SESet.diff set original in
-      if SESet.is_empty diff then false
-      else (
-        Hashtbl.remove mem key;
-        if SESet.mem Top diff then Hashtbl.add mem key (SESet.singleton Top)
-        else Hashtbl.add mem key (SESet.union original diff);
-        update_worklist diff;
-        worklist :=
-          Worklist.union
-            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-            !worklist;
-        changed := true;
-        true)
-  else (
-    Hashtbl.add mem key set;
-    update_worklist set;
-    worklist :=
-      Worklist.union
-        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-        !worklist;
-    changed := true;
-    true)
-
-let grammar : (pattern se, GESet.t) Hashtbl.t = Hashtbl.create 256
-
-let update_g var set =
-  let key = Var var in
-  if Hashtbl.mem grammar key then
-    let original = Hashtbl.find grammar key in
-    if GESet.mem Top original then false
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then false
-      else (
-        Hashtbl.remove grammar key;
-        if GESet.mem Top diff then Hashtbl.add grammar key (GESet.singleton Top)
-        else Hashtbl.add grammar key (GESet.union original diff);
-        update_worklist_g key diff;
-        changed := true;
-        true)
-  else (
-    Hashtbl.add grammar key set;
-    update_worklist_g key set;
-    changed := true;
-    true)
-
-let abs_mem : (loc, GESet.t) Hashtbl.t = Hashtbl.create 256
-
-let update_abs_loc key set =
-  if Hashtbl.mem abs_mem key then
-    let original = Hashtbl.find abs_mem key in
-    if GESet.mem Top original then false
-    else
-      let diff = GESet.diff set original in
-      if GESet.is_empty diff then false
-      else (
-        Hashtbl.remove abs_mem key;
-        if GESet.mem Top diff then Hashtbl.add abs_mem key (GESet.singleton Top)
-        else Hashtbl.add abs_mem key (GESet.union original diff);
-        worklist :=
-          Worklist.union
-            (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-            !worklist;
-        changed := true;
-        true)
-  else (
-    Hashtbl.add abs_mem key set;
-    worklist :=
-      Worklist.union
-        (try Hashtbl.find reverse_mem key with Not_found -> Worklist.empty)
-        !worklist;
-    changed := true;
-    true)
