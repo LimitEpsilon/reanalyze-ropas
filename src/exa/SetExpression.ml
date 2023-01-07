@@ -56,6 +56,7 @@ and loc = int * string (* records the file the address belongs to *)
 and _ se =
   | Top : _ se  (** _ *)
   | Const : CL.Asttypes.constant -> _ se
+  | Const_top : pattern se
   | Prim : CL.Primitive.description -> value se
       (** primitives, later converted to arith/rel/fld/mem *)
   | Fn : param * loc expr list -> value se  (** lambda expression *)

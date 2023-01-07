@@ -105,7 +105,7 @@ let value_prim = function
       },
       _ ) ->
     SESet.empty
-  | _ -> SESet.empty
+  | _ -> SESet.Total
 
 let packet_prim = function
   | {CL.Primitive.prim_name = "%revapply"}, [Some x; Some y] ->
@@ -168,7 +168,8 @@ let resolve_var var elt =
     if p.prim_arity = arg_len l then (
       let val_prim = value_prim (p, l) in
       update_c (Var var) val_prim |> ignore;
-      if SESet.Total = val_prim then update_g var GESet.Total |> ignore);
+      if val_prim = SESet.Total then
+        update_g var (GESet.singleton Const_top) |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
@@ -286,9 +287,9 @@ let resolve_var var elt =
           let g_set =
             if i < List.length l then
               match List.nth l i with
-              | Loc (_, Some p) -> (* print unsafe warning? *) GESet.singleton p
               | Loc (l, None) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
+              | Loc (_, Some p) -> (* print unsafe warning? *) GESet.singleton p
               | p -> GESet.singleton p
             else GESet.empty
           in
@@ -334,9 +335,9 @@ let resolve_var var elt =
           let g_set =
             if i < List.length l then
               match List.nth l i with
-              | Loc (_, Some p) -> GESet.singleton p
               | Loc (l, None) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
+              | Loc (_, Some p) -> GESet.singleton p
               | p -> GESet.singleton p
             else GESet.empty
           in
@@ -468,7 +469,8 @@ let resolve_mem loc elt =
     if p.prim_arity = arg_len l then (
       let val_prim = value_prim (p, l) in
       update_loc loc val_prim |> ignore;
-      if val_prim = SESet.Total then update_abs_loc loc GESet.Total |> ignore);
+      if val_prim = SESet.Total then
+        update_abs_loc loc (GESet.singleton Const_top) |> ignore);
     time_spent_in_closure :=
       !time_spent_in_closure +. (Unix.gettimeofday () -. t)
   | App_P (Prim p, l) when Worklist.mem (hash (Prim p)) prev_worklist ->
@@ -584,9 +586,9 @@ let resolve_mem loc elt =
           let g_set =
             if i < List.length l then
               match List.nth l i with
-              | Loc (_, Some p) -> GESet.singleton p
               | Loc (l, None) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
+              | Loc (_, Some p) -> GESet.singleton p
               | p -> GESet.singleton p
             else GESet.empty
           in
@@ -632,9 +634,9 @@ let resolve_mem loc elt =
           let g_set =
             if i < List.length l then
               match List.nth l i with
-              | Loc (_, Some p) -> GESet.singleton p
               | Loc (l, None) -> (
                 try Hashtbl.find abs_mem l with _ -> GESet.empty)
+              | Loc (_, Some p) -> GESet.singleton p
               | p -> GESet.singleton p
             else GESet.empty
           in

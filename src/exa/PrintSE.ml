@@ -106,6 +106,7 @@ let rec print_se : value se -> unit = function
 and print_pattern : pattern se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
+  | Const_top -> prerr_string "⊤"
   | Var e ->
     prerr_string "X (";
     print_tagged_expr e;

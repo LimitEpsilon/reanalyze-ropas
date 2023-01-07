@@ -37,6 +37,7 @@ and loc = int * string
 and _ se =
   | Top : _ se
   | Const : CL.Asttypes.constant -> _ se
+  | Const_top : pattern se
   | Prim : CL.Primitive.description -> value se
   | Fn : param * loc expr list -> value se
   | Var : _ tagged_expr -> _ se
