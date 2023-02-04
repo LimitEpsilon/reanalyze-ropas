@@ -14,142 +14,96 @@ type code_loc =
   | Expr_loc of expr_summary
   | Mod_loc of mod_summary
   | Bop_loc of CL.Types.value_description
+  | Temp
 
-and param = (CL.Ident.t * string) option
-and arg = value se option list
-
-and _ expr =
-  | Expr_var : (CL.Ident.t * string) -> param expr
-  | Expr : loc -> loc expr
-
-and arr = Static of loc list | Dynamic of loc
-
-and _ tagged_expr =
-  | Val : 'a expr -> 'a tagged_expr
-  | Packet : 'a expr -> 'a tagged_expr
-
+and loc = int * string
+and tagged_expr = Val of loc | Packet of loc
+and id = CL.Ident.t * string
+and param = id option
+and arg = tagged_expr option list
 and ctor = string option
 and fld = ctor * int option
 and pattern
 and value
-and loc = int * string
 
 and _ se =
   | Top : _ se
   | Const : CL.Asttypes.constant -> _ se
-  | Const_top : pattern se
-  | Prim : CL.Primitive.description -> value se
-  | Fn : param * loc expr list -> value se
-  | Var : _ tagged_expr -> _ se
-  | App_V : value se * arg -> value se
-  | App_P : value se * arg -> value se
-  | Ctor : ctor * arr -> value se
   | Ctor_pat : ctor * pattern se list -> pattern se
-  | Arr_pat : loc -> pattern se
-  | Fld : value se * fld -> value se
-  | Diff : value se * pattern se -> value se
-  | Loc : loc * pattern se option -> pattern se
+  | Var : tagged_expr -> value se
+  | Loc : loc -> value se
+  | Id : id -> value se
+  | Prim : CL.Primitive.description -> value se
+  | Fn : param * loc list -> value se
+  | App_v : tagged_expr * arg -> value se
+  | Prim_v : CL.Primitive.description * arg -> value se
+  | App_p : tagged_expr * arg -> value se
+  | Prim_p : CL.Primitive.description * arg -> value se
+  | Ctor : ctor * loc list -> value se
+  | Arr : loc -> value se
+  | Fld : tagged_expr * fld -> value se
+  | Diff : tagged_expr * pattern se -> value se
 
 module LocSet : Set.S with type elt = loc
 
 val current_module : string ref
 val new_memory : string -> loc
-val new_temp_var : string -> param expr
-val hash : 'a -> int
-
-module SESet : sig
-  module Internal : Set.S with type elt = value se
-
-  type t = Set of Internal.t | Total
-
-  val empty : t
-  val mem : value se -> t -> bool
-  val add : value se -> t -> t
-  val inter : t -> t -> t
-  val union : t -> t -> t
-  val diff : t -> t -> t
-  val is_empty : t -> bool
-  val elements : t -> value se list
-  val of_list : value se list -> t
-  val filter : (value se -> bool) -> t -> t
-  val iter : (value se -> unit) -> t -> unit
-  val fold : (value se -> 'a -> 'a) -> t -> 'a -> 'a
-  val singleton : value se -> t
-  val map : (value se -> value se) -> t -> t
-end
-
-module Worklist : sig
-  type t = (int, unit) Hashtbl.t
-
-  val add : int -> t -> unit
-  val mem : int -> t -> bool
-  val prepare_step : t -> t -> unit
-end
-
+val new_temp_var : string -> tagged_expr
 val new_array : int -> loc array
 val loc_of_summary : code_loc -> loc
 val loc_of_mod : CL.Typedtree.module_expr -> loc
-val expr_of_mod : CL.Typedtree.module_expr -> loc expr
-val val_of_mod : CL.Typedtree.module_expr -> value se
-val packet_of_mod : CL.Typedtree.module_expr -> value se
+val val_of_mod : CL.Typedtree.module_expr -> tagged_expr
+val packet_of_mod : CL.Typedtree.module_expr -> tagged_expr
 val loc_of_expr : CL.Typedtree.expression -> loc
-val expr_of_expr : CL.Typedtree.expression -> loc expr
-val val_of_expr : CL.Typedtree.expression -> value se
-val packet_of_expr : CL.Typedtree.expression -> value se
-val linking : bool ref
+val val_of_expr : CL.Typedtree.expression -> tagged_expr
+val packet_of_expr : CL.Typedtree.expression -> tagged_expr
+val val_of_path : CL.Path.t -> tagged_expr
+
+module SESet : Set.S with type elt = value se
+
+module Worklist : sig
+  type t = SESet.t ref
+
+  val add : SESet.elt -> t -> unit
+  val mem : SESet.elt -> t -> bool
+  val prepare_step : t -> t -> unit
+end
+
+module SEnv : sig
+  module Internal : Map.S with type key = id
+
+  type t = tagged_expr Internal.t
+
+  val compare : t -> t -> int
+
+  exception Inconsistent
+
+  val union : t -> t -> t
+end
+
+module Cstr : Map.S with type key = SEnv.t
+
+val cstr_union : SESet.t Cstr.t -> SESet.t Cstr.t -> SESet.t Cstr.t
 val worklist : Worklist.t
-val sc : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t
-val reverse_sc : (int, SESet.t) Hashtbl.t
-val lookup_sc : value se -> SESet.t
-val update_sc : value se -> value se list -> unit
-val memory : (string, (loc, SESet.t) Hashtbl.t) Hashtbl.t
-val reverse_mem : (int, LocSet.t) Hashtbl.t
-val lookup_mem : loc -> SESet.t
-val update_mem : loc -> value se list -> unit
+val prev_worklist : Worklist.t
+val sc : (value se, SESet.t Cstr.t) Hashtbl.t
+val reverse_sc : (value se, SESet.t) Hashtbl.t
+val lookup_sc : value se -> SESet.t Cstr.t
+val update_worklist : value se -> SESet.t -> unit
+val update_sc : value se -> SESet.t Cstr.t -> unit
+val get_context : value se -> string
+val init_sc : value se -> value se list -> unit
 
-type var_se_tbl = (string, (CL.Ident.t, SESet.t) Hashtbl.t) Hashtbl.t
+type var_se_tbl = (string, (CL.Ident.t, tagged_expr) Hashtbl.t) Hashtbl.t
 
-val var_to_se : var_se_tbl
-val update_var : CL.Ident.t -> value se list -> unit
-val se_of_var : CL.Ident.t -> string -> value se list
-
-type to_be_resolved = (loc, CL.Path.t * string) Hashtbl.t
-
-val to_be_resolved : to_be_resolved
-val update_to_be : loc -> CL.Path.t -> unit
+val global_env : var_se_tbl
+val unresolved_ids : (Ident.t, unit) Hashtbl.t
+val init_id : CL.Ident.t -> tagged_expr -> unit
+val lookup_id : id -> tagged_expr
 val label_to_summary : (loc, code_loc) Hashtbl.t
 val list_to_array : 'a list -> 'a array
 
 (* for resolution *)
 val changed : bool ref
-val prev_worklist : Worklist.t
 val exn_of_file : (string, value se list) Hashtbl.t
-
-module GESet : sig
-  module Internal : Set.S with type elt = pattern se
-
-  type t = Set of Internal.t | Total
-
-  val empty : t
-  val mem : pattern se -> t -> bool
-  val add : pattern se -> t -> t
-  val inter : t -> t -> t
-  val union : t -> t -> t
-  val diff : t -> t -> t
-  val is_empty : t -> bool
-  val elements : t -> pattern se list
-  val of_list : pattern se list -> t
-  val filter : (pattern se -> bool) -> t -> t
-  val iter : (pattern se -> unit) -> t -> unit
-  val fold : (pattern se -> 'a -> 'a) -> t -> 'a -> 'a
-  val singleton : pattern se -> t
-  val map : (pattern se -> pattern se) -> t -> t
-end
-
 val update_exn_of_file : string -> value se list -> unit
-val update_c : value se -> SESet.t -> bool
-val update_loc : loc -> SESet.t -> bool
-val grammar : (pattern se, GESet.t) Hashtbl.t
-val update_g : 'a tagged_expr -> GESet.t -> bool
-val abs_mem : (loc, GESet.t) Hashtbl.t
-val update_abs_loc : loc -> GESet.t -> bool
