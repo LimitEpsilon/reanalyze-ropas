@@ -97,7 +97,7 @@ val init_sc : value se -> value se list -> unit
 type var_se_tbl = (string, (CL.Ident.t, tagged_expr) Hashtbl.t) Hashtbl.t
 
 val global_env : var_se_tbl
-val unresolved_ids : (Ident.t, unit) Hashtbl.t
+val unresolved_ids : (CL.Ident.t, unit) Hashtbl.t
 val init_id : CL.Ident.t -> tagged_expr -> unit
 val lookup_id : id -> tagged_expr
 val label_to_summary : (loc, code_loc) Hashtbl.t

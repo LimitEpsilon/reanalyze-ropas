@@ -206,7 +206,7 @@ let lookup_sc se = try find sc se with Not_found -> Cstr.empty
 type var_se_tbl = (string, (CL.Ident.t, tagged_expr) t) t
 
 let global_env : var_se_tbl = create 10
-let unresolved_ids : (Ident.t, unit) t = create 10
+let unresolved_ids : (CL.Ident.t, unit) t = create 10
 
 (** lookup the identifier x called from module ctx under env, raises [Not_found] when the appropriate expr is not found *)
 let lookup_id (x, ctx) =
@@ -324,7 +324,14 @@ let rec val_of_path = function
     let temp = new_temp_var !current_module in
     init_sc (Var temp) [App_v (f, [Some x])];
     temp
-  | CL.Path.Pdot (x, fld) ->
+  | ((CL.Path.Pdot (x, fld, _)) [@if ocaml_version < (4, 08, 0) || defined npm])
+    ->
+    let x = val_of_path x in
+    let temp = new_temp_var !current_module in
+    init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
+    temp
+  | ((CL.Path.Pdot (x, fld))
+  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let x = val_of_path x in
     let temp = new_temp_var !current_module in
     init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
