@@ -48,7 +48,7 @@ module LocSet : Set.S with type elt = loc
 
 val current_module : string ref
 val new_memory : string -> loc
-val new_temp_var : string -> tagged_expr
+val new_temp_var : unit -> tagged_expr
 val new_array : int -> loc array
 val loc_of_summary : code_loc -> loc
 val loc_of_mod : CL.Typedtree.module_expr -> loc
@@ -86,11 +86,11 @@ module Cstr : Map.S with type key = SEnv.t
 val cstr_union : SESet.t Cstr.t -> SESet.t Cstr.t -> SESet.t Cstr.t
 val worklist : Worklist.t
 val prev_worklist : Worklist.t
-val sc : (value se, SESet.t Cstr.t) Hashtbl.t
-val reverse_sc : (value se, SESet.t) Hashtbl.t
-val lookup_sc : value se -> SESet.t Cstr.t
-val update_worklist : value se -> SESet.t -> unit
-val update_sc : value se -> SESet.t Cstr.t -> unit
+val sc : (value se, SESet.t) Hashtbl.t Cstr.t ref
+val reverse_sc : (value se, SESet.t) Hashtbl.t Cstr.t ref
+val lookup_sc : (value se, SESet.t) Hashtbl.t -> value se -> SESet.t
+val update_worklist : tagged_expr SEnv.Internal.t -> value se -> SESet.t -> unit
+val update_sc : tagged_expr SEnv.Internal.t -> value se -> SESet.t -> unit
 val get_context : value se -> string
 val init_sc : value se -> value se list -> unit
 

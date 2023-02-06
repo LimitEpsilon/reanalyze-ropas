@@ -38,7 +38,7 @@ let processCmt (cmt_infos : Cmt_format.cmt_infos) =
   | Interface _ -> ()
   | Implementation structure ->
     let v, p = se_of_struct structure in
-    let temp = new_temp_var !current_module in
+    let temp = new_temp_var () in
     init_sc (Var temp) v;
     init_id id temp;
     update_exn_of_file filename p;

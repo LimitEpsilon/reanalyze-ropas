@@ -98,7 +98,8 @@ let expression_label : (string, int) t = create 10
 let label_to_summary : (loc, code_loc) t = create 10
 let summary_to_label : (code_loc, loc) t = create 10
 
-let new_temp_var mod_name =
+let new_temp_var () =
+  let mod_name = !current_module in
   let temp =
     match find expression_label mod_name with
     | exception Not_found ->
@@ -198,17 +199,17 @@ end
 
 let worklist : Worklist.t = ref SESet.empty
 let prev_worklist : Worklist.t = ref SESet.empty
-let sc : (value se, SESet.t Cstr.t) t = create 10
-let reverse_sc : (value se, SESet.t) t = create 10
+let sc : (value se, SESet.t) t Cstr.t ref = ref Cstr.empty
+let reverse_sc : (value se, SESet.t) t Cstr.t ref = ref Cstr.empty
 let changed = ref false
-let lookup_sc se = try find sc se with Not_found -> Cstr.empty
+let lookup_sc tbl se = try find tbl se with Not_found -> SESet.empty
 
 type var_se_tbl = (string, (CL.Ident.t, tagged_expr) t) t
 
 let global_env : var_se_tbl = create 10
 let unresolved_ids : (CL.Ident.t, unit) t = create 10
 
-(** lookup the identifier x called from module ctx under env, raises [Not_found] when the appropriate expr is not found *)
+(** lookup the identifier x called from module ctx, raises [Not_found] when the appropriate expr is not found *)
 let lookup_id (x, ctx) =
   let local_tbl = Hashtbl.find global_env ctx in
   try Hashtbl.find local_tbl x
@@ -224,7 +225,15 @@ let cstr_union = Cstr.union (fun _ x y -> Some (SESet.union x y))
 
 exception Escape
 
-let update_worklist key set =
+let update_worklist env key set =
+  let tbl =
+    match Cstr.find env !reverse_sc with
+    | exception Not_found ->
+      let tbl = create 10 in
+      reverse_sc := Cstr.add env tbl !reverse_sc;
+      tbl
+    | tbl -> tbl
+  in
   let summarize elt =
     let idx =
       match elt with
@@ -239,9 +248,9 @@ let update_worklist key set =
         elt
       | _ -> raise Escape
     in
-    match find reverse_sc idx with
-    | exception Not_found -> add reverse_sc idx (SESet.singleton key)
-    | orig -> replace reverse_sc idx (SESet.add key orig)
+    match find tbl idx with
+    | exception Not_found -> add tbl idx (SESet.singleton key)
+    | orig -> replace tbl idx (SESet.add key orig)
   in
   match key with
   | Fld (e, _) -> summarize (Var e)
@@ -250,28 +259,29 @@ let update_worklist key set =
     SESet.iter (fun se -> try summarize se with Escape -> ()) set
   | _ -> failwith "Invalid LHS"
 
-let update_sc lhs added =
-  let updated =
-    Cstr.merge
-      (fun _ original added ->
-        match (original, added) with
-        | None, Some added ->
-          if SESet.is_empty added then None
-          else (
-            changed := true;
-            update_worklist lhs added;
-            Some added)
-        | Some original, Some added ->
-          let diff = SESet.diff added original in
-          if SESet.is_empty diff then Some original
-          else (
-            changed := true;
-            update_worklist lhs diff;
-            Some (SESet.union original diff))
-        | _ -> original)
-      (lookup_sc lhs) added
-  in
-  replace sc lhs updated
+let update_sc env lhs added =
+  if SESet.is_empty added then ()
+  else
+    let tbl =
+      match Cstr.find env !sc with
+      | exception Not_found ->
+        let tbl = create 10 in
+        sc := Cstr.add env tbl !sc;
+        tbl
+      | tbl -> tbl
+    in
+    match find tbl lhs with
+    | exception Not_found ->
+      changed := true;
+      update_worklist env lhs added;
+      add tbl lhs added
+    | original ->
+      let diff = SESet.diff added original in
+      if SESet.is_empty diff then ()
+      else (
+        changed := true;
+        update_worklist env lhs diff;
+        replace tbl lhs (SESet.union diff original))
 
 let get_context = function
   | Fld ((Packet (_, ctx) | Val (_, ctx)), _)
@@ -285,11 +295,16 @@ let init_sc lhs data =
   if data = [] then ()
   else
     let set = SESet.of_list data in
-    let value = Cstr.add SEnv.Internal.empty set Cstr.empty in
-    update_worklist lhs set;
-    match find sc lhs with
-    | exception Not_found -> add sc lhs value
-    | original -> replace sc lhs (cstr_union original value)
+    update_worklist SEnv.Internal.empty lhs set;
+    match Cstr.find SEnv.Internal.empty !sc with
+    | exception Not_found ->
+      let tbl = create 10 in
+      sc := Cstr.add SEnv.Internal.empty tbl !sc;
+      add tbl lhs set
+    | tbl -> (
+      match find tbl lhs with
+      | exception Not_found -> add tbl lhs set
+      | original -> replace tbl lhs (SESet.union original set))
 
 let init_id id expr =
   match find global_env !current_module with
@@ -321,23 +336,23 @@ let rec val_of_path = function
   | CL.Path.Papply (f, x) ->
     let f = val_of_path f in
     let x = val_of_path x in
-    let temp = new_temp_var !current_module in
+    let temp = new_temp_var () in
     init_sc (Var temp) [App_v (f, [Some x])];
     temp
   | ((CL.Path.Pdot (x, fld, _)) [@if ocaml_version < (4, 08, 0) || defined npm])
     ->
     let x = val_of_path x in
-    let temp = new_temp_var !current_module in
+    let temp = new_temp_var () in
     init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
     temp
   | ((CL.Path.Pdot (x, fld))
   [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
     let x = val_of_path x in
-    let temp = new_temp_var !current_module in
+    let temp = new_temp_var () in
     init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
     temp
   | CL.Path.Pident x ->
-    let temp = new_temp_var !current_module in
+    let temp = new_temp_var () in
     init_sc (Var temp) [Id (x, !current_module)];
     temp
 

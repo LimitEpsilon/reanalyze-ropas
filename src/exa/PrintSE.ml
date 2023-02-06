@@ -232,24 +232,18 @@ let show_local_env (env : SEnv.t) =
     env;
   prerr_string "}"
 
-let show_sc_tbl (tbl : (value se, SESet.t Cstr.t) Hashtbl.t) =
+let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
-    (fun lhs cstr ->
-      Cstr.iter
-        (fun env data ->
-          if SESet.is_empty data then ()
-          else (
-            prerr_string "sc under ";
-            show_local_env env;
-            prerr_newline ();
-            print_se lhs;
-            (match lhs with
-            | Fld (_, _) -> prerr_string " <- "
-            | _ -> prerr_string " = ");
-            prerr_newline ();
-            show_se_with_separator data "\t";
-            prerr_newline ()))
-        cstr)
+    (fun lhs data ->
+      if SESet.is_empty data then ()
+      else (
+        print_se lhs;
+        (match lhs with
+        | Fld (_, _) -> prerr_string " <- "
+        | _ -> prerr_string " = ");
+        prerr_newline ();
+        show_se_with_separator data "\t";
+        prerr_newline ()))
     tbl
 
 let tracked_vars : (value se, unit) Hashtbl.t = Hashtbl.create 10
@@ -307,38 +301,36 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
           List.iter
             (function
               | Var (Packet loc) ->
-                let cstr = lookup_sc (Var (Packet loc)) in
-                if Cstr.is_empty cstr then ()
-                else (
-                  prerr_string " Escaped from ";
-                  print_loc loc;
-                  prerr_endline ":";
-                  Cstr.iter
-                    (fun env ->
-                      prerr_string "\tUnder ";
-                      show_local_env env;
-                      prerr_newline ();
-                      SESet.iter (function
-                        | Ctor (Some ctor, l) ->
-                          printed := true;
-                          prerr_string "\t";
-                          track_path := ctor = !Common.Cli.ctor_to_track;
-                          prerr_string (" " ^ ctor ^ " with arguments ");
-                          print_list_with_separator l ";";
-                          prerr_newline ();
-                          Hashtbl.clear tracked_vars
-                          (* track_exception (Var (Packet (Expr loc))) exn; *)
-                          (* explain_abs_mem () *)
-                        | Top ->
-                          printed := true;
-                          prerr_string "\t";
-                          print_pattern Top;
-                          prerr_newline ();
-                          Hashtbl.clear tracked_vars
-                        (* track_exception (Var (Packet (Expr loc))) exn *)
-                        | _ -> ()))
-                    cstr;
-                  prerr_newline ())
+                Cstr.iter
+                  (fun _ tbl ->
+                    let exns = lookup_sc tbl (Var (Packet loc)) in
+                    if SESet.is_empty exns then ()
+                    else (
+                      prerr_string " Escaped from ";
+                      print_loc loc;
+                      prerr_endline ":";
+                      SESet.iter
+                        (function
+                          | Ctor (Some ctor, l) ->
+                            printed := true;
+                            prerr_string "\t";
+                            track_path := ctor = !Common.Cli.ctor_to_track;
+                            prerr_string (" " ^ ctor ^ " with arguments ");
+                            print_list_with_separator l ";";
+                            prerr_newline ();
+                            Hashtbl.clear tracked_vars
+                            (* track_exception (Var (Packet (Expr loc))) exn; *)
+                            (* explain_abs_mem () *)
+                          | Top ->
+                            printed := true;
+                            prerr_string "\t";
+                            print_pattern Top;
+                            prerr_newline ();
+                            Hashtbl.clear tracked_vars
+                          (* track_exception (Var (Packet (Expr loc))) exn *)
+                          | _ -> ())
+                        exns))
+                  !sc
               | _ -> ())
             data
         in
@@ -348,31 +340,32 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
   Hashtbl.iter
-    (fun lhs cstr ->
-      Cstr.iter
-        (fun env data ->
-          let set =
-            SESet.filter
-              (fun x ->
-                match x with
-                | App_v (_, _) | Fn (_, _) | Prim _ -> true
-                | _ -> false)
-              data
-          in
-          if SESet.is_empty set then ()
-          else (
-            print_se lhs;
-            prerr_string " under ";
-            show_local_env env;
-            prerr_newline ();
-            show_se_with_separator set "\t";
-            prerr_newline ()))
-        cstr)
+    (fun lhs data ->
+      let set =
+        SESet.filter
+          (fun x ->
+            match x with
+            | App_v (_, _) | Fn (_, _) | Prim _ -> true
+            | _ -> false)
+          data
+      in
+      if SESet.is_empty set then ()
+      else (
+        print_se lhs;
+        prerr_newline ();
+        show_se_with_separator set "\t";
+        prerr_newline ()))
     tbl
 
 let print_sc_info () =
   show_var_se_tbl global_env;
-  show_sc_tbl sc
+  Cstr.iter
+    (fun env tbl ->
+      prerr_string "Under ";
+      show_local_env env;
+      prerr_newline ();
+      show_sc_tbl tbl)
+    !sc
 
 let print_exa () =
   Format.flush_str_formatter () |> ignore;
@@ -380,4 +373,10 @@ let print_exa () =
 
 let print_closure () =
   Format.flush_str_formatter () |> ignore;
-  show_closure_analysis sc
+  Cstr.iter
+    (fun env tbl ->
+      prerr_string "Under ";
+      show_local_env env;
+      prerr_newline ();
+      show_closure_analysis tbl)
+    !sc
