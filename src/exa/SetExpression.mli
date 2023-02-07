@@ -82,11 +82,13 @@ module SEnv : sig
 end
 
 module Cstr : Map.S with type key = SEnv.t
+module SEnvSet : Set.S with type elt = SEnv.t
 
 val cstr_union : SESet.t Cstr.t -> SESet.t Cstr.t -> SESet.t Cstr.t
 val worklist : Worklist.t
 val prev_worklist : Worklist.t
 val sc : (value se, SESet.t) Hashtbl.t Cstr.t ref
+val environments : (value se, SEnvSet.t) Hashtbl.t
 val reverse_sc : (value se, SESet.t) Hashtbl.t Cstr.t ref
 val lookup_sc : (value se, SESet.t) Hashtbl.t -> value se -> SESet.t
 val update_worklist : tagged_expr SEnv.Internal.t -> value se -> SESet.t -> unit

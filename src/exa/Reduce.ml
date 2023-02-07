@@ -237,83 +237,155 @@ let filter_pat env lhs = function
     update_sc env lhs value
 
 (** given a collection of set expressions under env, elaborate upon possible expressions *)
-let elaborate env lhs tbl = function
+let elaborate env lhs = function
   | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | App_p (_, None :: _)
   | Prim_v _ | Prim_p _ | Id _ ->
     ()
   | App_v (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (elaborate_app env lhs e' tl) expanded_e
-  | App_p (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (elaborate_app_p env lhs e' tl) expanded_e
-  | App_v (e, []) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (elaborate_lazy env lhs) expanded_e
-  | App_p (e, []) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (elaborate_lazy_p env lhs) expanded_e
-  | Fld (e, fld) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (elaborate_fld env lhs fld) expanded_e
-  | Diff (e, p) when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = lookup_sc tbl (Var e) in
-    SESet.iter (fun e -> filter_pat env lhs (e, p)) expanded_e
-  | Var e when Worklist.mem (Var e) prev_worklist ->
-    let expanded_e = SESet.filter filter (lookup_sc tbl (Var e)) in
-    update_sc env lhs expanded_e
-  | Loc l when Worklist.mem (Loc l) prev_worklist ->
-    let expanded_l = SESet.filter filter (lookup_sc tbl (Loc l)) in
-    update_sc env lhs expanded_l
-  | _ -> ()
-
-let for_each_constraint merged tbl tbl' lhs =
-  let rhs = lookup_sc tbl lhs in
-  match lhs with
-  | Var _ | Loc _ -> SESet.iter (elaborate merged lhs tbl') rhs
-  | Fld (e, (None, Some i)) ->
-    let expanded_e = lookup_sc tbl' (Var e) in
-    SESet.iter
-      (function
-        | Id x -> (
-          try
-            let lhs = lookup_id x in
-            update_sc merged (Fld (lhs, (None, Some i))) rhs
-          with Not_found -> ())
-        | Ctor (_, l) -> (
-          try
-            let lhs = Loc (List.nth l i) in
-            update_sc merged lhs rhs
-          with _ -> ())
-        | _ -> ())
-      expanded_e
-  | _ -> failwith "Invalid LHS"
-
-let rec one_step seq worklist_with_context =
-  match seq () with
-  | Seq.Nil -> ()
-  | Seq.Cons ((env, tbl), tl) ->
-    let to_elaborate =
-      try Cstr.find env worklist_with_context with Not_found -> SESet.empty
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
     in
-    Seq.iter
-      (fun (env', tbl') ->
+    SEnvSet.iter
+      (fun env' ->
         try
           let merged = SEnv.union env env' in
-          let to_elaborate' =
-            try Cstr.find env' worklist_with_context
-            with Not_found -> SESet.empty
-          in
-          SESet.iter (for_each_constraint merged tbl tbl') to_elaborate;
-          SESet.iter (for_each_constraint merged tbl' tbl) to_elaborate'
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (elaborate_app merged lhs e' tl) set
         with SEnv.Inconsistent -> ())
-      seq;
-    one_step tl worklist_with_context
+      envs_to_lookup
+  | App_p (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (elaborate_app_p merged lhs e' tl) set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | App_v (e, []) when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (elaborate_lazy merged lhs) set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | App_p (e, []) when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (elaborate_lazy_p merged lhs) set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | Fld (e, fld) when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (elaborate_fld merged lhs fld) set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | Diff (e, p) when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter (fun e -> filter_pat merged lhs (e, p)) set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | Var e when Worklist.mem (Var e) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set =
+            SESet.filter filter (Hashtbl.find (Cstr.find env' !sc) (Var e))
+          in
+          update_sc merged lhs set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | Loc l when Worklist.mem (Loc l) prev_worklist ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Loc l) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set =
+            SESet.filter filter (Hashtbl.find (Cstr.find env' !sc) (Loc l))
+          in
+          update_sc merged lhs set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | _ -> ()
+
+let for_each_constraint env lhs rhs =
+  match lhs with
+  | Var _ | Loc _ -> SESet.iter (elaborate env lhs) rhs
+  | Fld (e, (None, Some i)) ->
+    let envs_to_lookup =
+      try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
+    in
+    SEnvSet.iter
+      (fun env' ->
+        try
+          let merged = SEnv.union env env' in
+          let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
+          SESet.iter
+            (function
+              | Id x -> (
+                try
+                  let lhs = lookup_id x in
+                  update_sc merged (Fld (lhs, (None, Some i))) rhs
+                with Not_found -> ())
+              | Ctor (_, l) -> (
+                try
+                  let lhs = Loc (List.nth l i) in
+                  update_sc merged lhs rhs
+                with _ -> ())
+              | _ -> ())
+            set
+        with SEnv.Inconsistent -> ())
+      envs_to_lookup
+  | _ -> failwith "Invalid LHS"
+
+let one_step worklist_with_context env tbl =
+  let to_elaborate =
+    try Cstr.find env worklist_with_context with Not_found -> SESet.empty
+  in
+  SESet.iter
+    (fun lhs ->
+      let rhs = lookup_sc tbl lhs in
+      for_each_constraint env lhs rhs)
+    to_elaborate
 
 let step_sc () =
-  let seq = Cstr.to_seq !sc in
   let worklist_with_context =
     Cstr.map
       (fun tbl ->
@@ -324,9 +396,13 @@ let step_sc () =
           !prev_worklist SESet.empty)
       !reverse_sc
   in
-  one_step seq worklist_with_context
+  Cstr.iter (one_step worklist_with_context) !sc
+
+let num_of_iters = ref 0
 
 let prepare_step () =
+  incr num_of_iters;
+  prerr_endline ("Iteration #" ^ string_of_int !num_of_iters);
   changed := false;
   Worklist.prepare_step worklist prev_worklist
 

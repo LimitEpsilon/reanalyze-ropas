@@ -224,11 +224,10 @@ let show_local_env (env : SEnv.t) =
   prerr_string "{";
   SEnv.Internal.iter
     (fun (x, _) expr ->
-      if !first then first := false else prerr_string "; ";
+      if !first then first := false else prerr_string "\n; ";
       prerr_string (CL.Ident.unique_name x);
       prerr_string "↦ ";
-      print_tagged_expr expr;
-      prerr_newline ())
+      print_tagged_expr expr)
     env;
   prerr_string "}"
 

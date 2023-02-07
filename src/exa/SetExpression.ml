@@ -185,6 +185,7 @@ module SEnv = struct
 end
 
 module Cstr = Map.Make (SEnv)
+module SEnvSet = Set.Make (SEnv)
 
 module Worklist = struct
   type t = SESet.t ref
@@ -200,6 +201,7 @@ end
 let worklist : Worklist.t = ref SESet.empty
 let prev_worklist : Worklist.t = ref SESet.empty
 let sc : (value se, SESet.t) t Cstr.t ref = ref Cstr.empty
+let environments : (value se, SEnvSet.t) t = create 10
 let reverse_sc : (value se, SESet.t) t Cstr.t ref = ref Cstr.empty
 let changed = ref false
 let lookup_sc tbl se = try find tbl se with Not_found -> SESet.empty
@@ -256,7 +258,14 @@ let update_worklist env key set =
   | Fld (e, _) -> summarize (Var e)
   | Loc _ | Var _ ->
     Worklist.add key worklist;
-    SESet.iter (fun se -> try summarize se with Escape -> ()) set
+    SESet.iter
+      (fun se ->
+        try summarize se
+        with Escape -> (
+          match find environments key with
+          | exception Not_found -> add environments key (SEnvSet.singleton env)
+          | original -> replace environments key (SEnvSet.add env original)))
+      set
   | _ -> failwith "Invalid LHS"
 
 let update_sc env lhs added =
