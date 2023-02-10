@@ -245,7 +245,7 @@ let update_worklist env key set =
       | Diff (e, _) ->
         Worklist.add (Var e) worklist;
         Var e
-      | Var _ | Loc _ ->
+      | Var _ | Loc _ | Id _ ->
         Worklist.add elt worklist;
         elt
       | _ -> raise Escape

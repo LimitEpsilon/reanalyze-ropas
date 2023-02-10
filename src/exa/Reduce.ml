@@ -86,12 +86,6 @@ let time_spent_in_update = ref 0.0
 let time_spent_in_const = ref 0.0
 
 let elaborate_app env lhs hd tl = function
-  | Id (x, ctx) -> (
-    try
-      let bound = lookup_id (x, ctx) in
-      let value = SESet.singleton (App_v (bound, Some hd :: tl)) in
-      update_sc env lhs value
-    with Not_found -> ())
   | Fn (Some x, body) ->
     let value =
       SESet.of_list
@@ -123,12 +117,6 @@ let elaborate_app env lhs hd tl = function
   | _ -> ()
 
 let elaborate_app_p env lhs hd tl = function
-  | Id (x, ctx) -> (
-    try
-      let bound = lookup_id (x, ctx) in
-      let packet = SESet.singleton (App_p (bound, Some hd :: tl)) in
-      update_sc env lhs packet
-    with Not_found -> ())
   | Fn (Some x, body) ->
     let app =
       if tl = [] then SESet.empty
@@ -158,24 +146,12 @@ let elaborate_app_p env lhs hd tl = function
   | _ -> ()
 
 let elaborate_lazy env lhs = function
-  | Id (x, ctx) -> (
-    try
-      let bound = lookup_id (x, ctx) in
-      let value = SESet.singleton (App_v (bound, [])) in
-      update_sc env lhs value
-    with Not_found -> ())
   | Fn (None, body) ->
     let value = SESet.of_list (List.map (fun loc -> Var (Val loc)) body) in
     update_sc env lhs value
   | _ -> ()
 
 let elaborate_lazy_p env lhs = function
-  | Id (x, ctx) -> (
-    try
-      let bound = lookup_id (x, ctx) in
-      let packet = SESet.singleton (App_p (bound, [])) in
-      update_sc env lhs packet
-    with Not_found -> ())
   | Fn (None, body) ->
     let packet = SESet.of_list (List.map (fun loc -> Var (Packet loc)) body) in
     update_sc env lhs packet
@@ -183,12 +159,6 @@ let elaborate_lazy_p env lhs = function
 
 let elaborate_fld env lhs fld = function
   | Top -> update_sc env lhs (SESet.singleton Top)
-  | Id (x, ctx) -> (
-    try
-      let bound = lookup_id (x, ctx) in
-      let value = SESet.singleton (Fld (bound, fld)) in
-      update_sc env lhs value
-    with Not_found -> ())
   | Ctor (kappa, l) ->
     let value =
       match fld with
@@ -209,7 +179,7 @@ let filter = function
   | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | App_p (_, None :: _)
-  | Prim_v _ | Prim_p _ | Id _ ->
+  | Prim_v _ | Prim_p _ ->
     true
   | _ -> false
 
@@ -241,8 +211,14 @@ let elaborate env lhs = function
   | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | App_p (_, None :: _)
-  | Prim_v _ | Prim_p _ | Id _ ->
+  | Prim_v _ | Prim_p _ ->
     ()
+  | Id x -> (
+    assert (SEnv.Internal.is_empty env);
+    try
+      let bound = lookup_id x in
+      update_sc env lhs (SESet.singleton (Var bound))
+    with Not_found -> ())
   | App_v (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
     let envs_to_lookup =
       try Hashtbl.find environments (Var e) with Not_found -> SEnvSet.empty
@@ -359,11 +335,6 @@ let for_each_constraint env lhs rhs =
           let set = Hashtbl.find (Cstr.find env' !sc) (Var e) in
           SESet.iter
             (function
-              | Id x -> (
-                try
-                  let lhs = lookup_id x in
-                  update_sc merged (Fld (lhs, (None, Some i))) rhs
-                with Not_found -> ())
               | Ctor (_, l) -> (
                 try
                   let lhs = Loc (List.nth l i) in
@@ -403,6 +374,9 @@ let num_of_iters = ref 0
 let prepare_step () =
   incr num_of_iters;
   prerr_endline ("Iteration #" ^ string_of_int !num_of_iters);
+  (* if !num_of_iters > 10 then ( *)
+  (*   PrintSE.print_sc_info (); *)
+  (*   failwith "timeout"); *)
   changed := false;
   Worklist.prepare_step worklist prev_worklist
 
