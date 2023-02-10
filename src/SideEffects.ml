@@ -1,3 +1,5 @@
+[%%import "../config.h"]
+
 let whiteListSideEffects =
   [
     "Pervasives./.";
@@ -77,7 +79,8 @@ and exprOptNoSideEffects eo =
 
 and fieldNoSideEffects ((_ld, rld) : _ * CL.Typedtree.record_label_definition) =
   match rld with
-  | Kept _typeExpr -> true
+  | ((Kept _) [@if ocaml_version < (5, 0, 0) || defined npm]) -> true
+  | ((Kept (_, _)) [@if ocaml_version >= (5, 0, 0) && not_defined npm]) -> true
   | Overridden (_lid, e) -> e |> exprNoSideEffects
 
 and caseNoSideEffects : type k. k Compat.typedtreeCase -> _ =

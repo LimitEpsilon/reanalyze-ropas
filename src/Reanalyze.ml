@@ -57,7 +57,10 @@ let processCmtFiles ~cmtRoot =
         else if
           Filename.check_suffix absDir ".cmt"
           || Filename.check_suffix absDir ".cmti"
-        then absDir |> loadCmtFile
+        then
+          try absDir |> loadCmtFile
+          with _ ->
+            prerr_string ("Processing .cmt file at: " ^ absDir ^ " failed\n")
     in
     walkSubDirs ""
   | None ->
@@ -83,7 +86,10 @@ let processCmtFiles ~cmtRoot =
            cmtFiles |> List.sort String.compare
            |> List.iter (fun cmtFile ->
                   let cmtFilePath = Filename.concat libBsSourceDir cmtFile in
-                  cmtFilePath |> loadCmtFile))
+                  try cmtFilePath |> loadCmtFile
+                  with _ ->
+                    prerr_string
+                      ("Processing .cmt file at: " ^ cmtFilePath ^ " failed\n")))
 
 let runAnalysis ~cmtRoot ~ppf =
   Log_.Color.setup ();
@@ -99,7 +105,7 @@ let runAnalysis ~cmtRoot ~ppf =
   if runConfig.exception_ then Exception.reportResults ~ppf;
   if runConfig.noalloc then Noalloc.reportResults ~ppf;
   if runConfig.termination then Arnold.reportResults ~ppf;
-  let nIssues = Log_.Stats.report () in
+  let nIssues = if runConfig.exception_ then 0 else Log_.Stats.report () in
   Log_.Stats.clear ();
   if !Common.Cli.json then EmitJson.finish ();
   if nIssues > 0 && !Common.Cli.exitCode then exit 1
@@ -169,6 +175,9 @@ let cli () =
         String (fun s -> setException (Some s)),
         "root_path Experimental exception analysis for all the .cmt files \
          under the root path" );
+      ( "-exception-track",
+        String (fun s -> Cli.ctor_to_track := s),
+        "ctor_to_track Specify exception constructor to track" );
       ( "-native-build-target",
         String (fun s -> Common.Cli.nativeBuildTarget := Some s),
         "A path for the build target, defaults to ''. Can be useful for native \
@@ -243,7 +252,9 @@ let cli () =
 ;;
 
 (match () with
-| (() [@if defined dev]) -> Memtrace.trace_if_requested ()
+| (() [@if defined dev]) ->
+  Printexc.record_backtrace true;
+  Memtrace.trace_if_requested ()
 | (() [@if not_defined dev]) -> ());
 cli ()
 [@@raises exit]
