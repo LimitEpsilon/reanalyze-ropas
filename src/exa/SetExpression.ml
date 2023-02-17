@@ -18,23 +18,13 @@ type code_loc =
   | Expr_loc of expr_summary
   | Mod_loc of mod_summary
   | Bop_loc of CL.Types.value_description
+  | Temp
 
-and param = (CL.Ident.t * string) option (* use Texp_function's param *)
-and arg = value se option list
-
-and _ expr =
-  | Expr_var : (CL.Ident.t * string) -> param expr (* record the file *)
-  | Expr : loc -> loc expr
-
-and arr =
-  | Static of loc list
-      (** statically allocated arrays such as records, variants, or tuples *)
-  | Dynamic of loc
-      (** dynamically allocated array, decoded from the Prim set expression *)
-
-and _ tagged_expr =
-  | Val : 'a expr -> 'a tagged_expr
-  | Packet : 'a expr -> 'a tagged_expr
+and loc = int * string (* records the file the address belongs to *)
+and tagged_expr = Val of loc | Packet of loc
+and id = CL.Ident.t * string
+and param = id option (* use Texp_function's param *)
+and arg = tagged_expr option list
 
 and ctor = string option
 (** variant : Some Types.cstr_name
@@ -50,58 +40,49 @@ and pattern
 (* phantom type for pattern screening *)
 
 and value
-and loc = int * string (* records the file the address belongs to *)
 
 (** set expression type *)
 and _ se =
   | Top : _ se  (** _ *)
   | Const : CL.Asttypes.constant -> _ se
-  | Const_top : pattern se
+  | Ctor_pat : ctor * pattern se list -> _ se  (** For pattern screening *)
+  | Var : tagged_expr -> value se  (** set variable *)
+  | Loc : loc -> value se  (** !ℓ *)
+  | Id : id -> value se  (** identifiers *)
   | Prim : CL.Primitive.description -> value se
-      (** primitives, later converted to arith/rel/fld/mem *)
-  | Fn : param * loc expr list -> value se  (** lambda expression *)
-  | Var : _ tagged_expr -> _ se  (** set variable *)
-  | App_V : value se * arg -> value se
-      (** possible values / force when arg = nil / prim_v when lhs is Prim *)
-  | App_P : value se * arg -> value se
-      (** possible exn packets / force when arg = nil / prim_p when lhs is Prim *)
-  | Ctor : ctor * arr -> value se  (** One ADT to rule them all :D *)
-  | Ctor_pat : ctor * pattern se list -> pattern se
-      (** For pattern screening *)
-  | Arr_pat : loc -> pattern se
-  | Fld : value se * fld -> value se  (** field of a record / deconstruct *)
-  | Diff : value se * pattern se -> value se  (** screening *)
-  | Loc : loc * pattern se option -> pattern se
+      (** primitives, later converted to top/fld/arr/ctor *)
+  | Fn : param * loc list -> value se  (** lambda expression *)
+  | App_v : tagged_expr * arg -> value se
+      (** possible values / force when arg = nil *)
+  | Prim_v : CL.Primitive.description * arg -> value se
+  | App_p : tagged_expr * arg -> value se
+      (** possible exn packets / force when arg = nil *)
+  | Prim_p : CL.Primitive.description * arg -> value se
+  | Ctor : ctor * (loc * pattern se option) list -> value se
+      (** One ADT to rule them all :D *)
+  | Arr : loc -> value se  (** Dynamically allocated arrays *)
+  | Fld : tagged_expr * fld -> value se  (** field of a record / deconstruct *)
+  | Diff : tagged_expr * pattern se -> value se  (** screening *)
 
-(* divide_by_zero : check denominator, if constant check if zero.
-                  : if identifier look up in var_to_se to check if constant
-                  : if constant check if zero, else mark might_raise *)
-module Loc = struct
+let pat_to_val : pattern se -> value se = function
+  | Top -> Top
+  | Const c -> Const c
+  | Ctor_pat (k, l) -> Ctor_pat (k, l)
+
+let val_to_pat : value se -> pattern se option = function
+  | (Top | Const _ | Ctor_pat _) as p -> Some p
+  | _ -> None
+
+(** For labelling expressions and memory locations *)
+module LocSet = Set.Make (struct
   type t = loc
 
   let compare = compare
-end
-
-module LocSet = Set.Make (Loc)
+end)
 
 let current_module = ref ""
-let temp_variable_label : (string, int) t = create 10
 
-let new_temp_var mod_name =
-  let temp =
-    match find temp_variable_label mod_name with
-    | exception Not_found ->
-      add temp_variable_label mod_name 0;
-      0
-    | lbl ->
-      replace temp_variable_label mod_name (lbl + 1);
-      lbl + 1
-  in
-  let temp_id =
-    CL.Ident.create_persistent (mod_name ^ "__temp" ^ string_of_int temp)
-  in
-  Expr_var (temp_id, mod_name)
-
+(** Tracks the number of memory locations labelled for each file *)
 let address : (string, int) t = create 10
 
 let new_memory mod_name =
@@ -120,248 +101,26 @@ let new_array size =
   let arr = Array.make size !current_module in
   Array.map new_memory arr
 
-module SE = struct
-  type t = value se
-
-  let compare = compare
-end
-
-module SESet = struct
-  module Internal = Set.Make (SE)
-
-  type t = Set of Internal.t | Total
-
-  let empty = Set Internal.empty
-
-  let mem (x : value se) (set : t) =
-    match set with Total -> true | Set s -> Internal.mem x s
-
-  let add (x : value se) (set : t) =
-    match (x, set) with
-    | Top, _ -> Total
-    | _, Total -> Total
-    | _, Set s -> Set (Internal.add x s)
-
-  let inter (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> s1
-    | Total, _ -> s2
-    | Set s1, Set s2 -> Set (Internal.inter s1 s2)
-
-  let union (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> Total
-    | Total, _ -> Total
-    | Set s1, Set s2 -> Set (Internal.union s1 s2)
-
-  let diff (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> Set Internal.empty
-    | Total, _ -> Total
-    | Set s1, Set s2 -> Set (Internal.diff s1 s2)
-
-  let is_empty = function Total -> false | Set s -> Internal.is_empty s
-  let elements = function Total -> [Top] | Set s -> Internal.elements s
-  let of_list l = if List.mem Top l then Total else Set (Internal.of_list l)
-
-  let filter f = function
-    | Total -> if f Top then Total else empty
-    | Set s -> Set (Internal.filter f s)
-
-  let iter f = function Total -> f Top | Set s -> Internal.iter f s
-
-  let fold f set acc =
-    match set with Total -> f Top acc | Set s -> Internal.fold f s acc
-
-  let singleton = function Top -> Total | x -> Set (Internal.singleton x)
-
-  let map f = function
-    | Total ->
-      let elt = f Top in
-      singleton elt
-    | Set s ->
-      let set = Internal.map f s in
-      if Internal.mem Top set then Total else Set set
-end
-
-module Worklist = struct
-  type t = (int, unit) Hashtbl.t
-
-  let add x (worklist : t) = if mem worklist x then () else add worklist x ()
-  let mem x (worklist : t) = mem worklist x
-
-  let prepare_step (worklist : t) (prev_worklist : t) =
-    reset prev_worklist;
-    iter (fun x () -> add x prev_worklist) worklist;
-    reset worklist
-end
-
-let linking = ref false
-let worklist : Worklist.t = create 10
-let affected_vars : (loc, Worklist.t) t = create 10
-let sc : (string, (value se, SESet.t) t) t = create 10
-let reverse_sc : (int, SESet.t) t = create 10
-let hash = hash
-
-let update_worklist set =
-  let summarize = function
-    | App_V (x, _) | App_P (x, _) -> Worklist.add (hash x) worklist
-    | Var x -> Worklist.add (hash (Var x)) worklist
-    | Ctor (kappa, arr) -> Worklist.add (hash (Ctor (kappa, arr))) worklist
-    | _ -> ()
-  in
-  SESet.iter summarize set
-
-exception Escape
-
-let update_reverse_sc key set =
-  let summarize elt =
-    let idx =
-      match elt with
-      | App_V (x, _) | App_P (x, _) | Fld (x, _) | Diff (x, _) -> hash x
-      | Var _ | Ctor _ -> hash elt
-      | _ -> raise Escape
-    in
-    match find reverse_sc idx with
-    | exception Not_found -> add reverse_sc idx (SESet.singleton key)
-    | orig -> replace reverse_sc idx (SESet.add key orig)
-  in
-  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set;
-  match key with Fld (Var x, _) -> summarize (Var x) | _ -> ()
-
-let get_context_fld = function
-  | Fld
-      ( Var
-          ( Val (Expr (_, ctx) | Expr_var (_, ctx))
-          | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ),
-        _ ) ->
-    ctx
-  | _ -> raise Not_found
-
-let get_context = function
-  | Var
-      ( Val (Expr (_, ctx) | Expr_var (_, ctx))
-      | Packet (Expr (_, ctx) | Expr_var (_, ctx)) ) ->
-    ctx
-  | _ -> raise Not_found
-
-let lookup_sc key =
-  let context = try get_context key with _ -> get_context_fld key in
-  find (find sc context) key
-
-let update_sc key data =
-  let context = try get_context key with _ -> get_context_fld key in
-  let sc =
-    match find sc context with
-    | exception Not_found ->
-      let tbl = create 10 in
-      add sc !current_module tbl;
-      tbl
-    | tbl -> tbl
-  in
-  let set = SESet.of_list data in
-  update_worklist set;
-  update_reverse_sc key set;
-  if mem sc key then
-    let original = find sc key in
-    replace sc key (SESet.union original set)
-  else (
-    add sc key set;
-    update_worklist (SESet.singleton key))
-
-type var_se_tbl = (string, (CL.Ident.t, SESet.t) t) t
-
-let var_to_se : var_se_tbl = create 10
-
-let update_var key data =
-  let set = SESet.of_list data in
-  match find var_to_se !current_module with
-  | exception Not_found ->
-    let tbl = create 10 in
-    add tbl key set;
-    add var_to_se !current_module tbl
-  | tbl -> (
-    match find tbl key with
-    | exception Not_found -> add tbl key set
-    | original -> replace tbl key (SESet.union original set))
-
-type to_be_resolved = (loc, CL.Path.t * string) t
-
-let to_be_resolved : to_be_resolved = create 256
-let update_to_be key data = add to_be_resolved key (data, !current_module)
-let memory : (string, (loc, SESet.t) t) t = create 10
-let reverse_mem : (int, LocSet.t) t = create 10
-
-let update_reverse_mem key set =
-  let summarize elt =
-    let idx =
-      match elt with
-      | App_V (x, _) | App_P (x, _) | Fld (x, _) | Diff (x, _) -> hash x
-      | Var _ | Ctor _ -> hash elt
-      | _ -> raise Escape
-    in
-    match find reverse_mem idx with
-    | exception Not_found -> add reverse_mem idx (LocSet.singleton key)
-    | orig -> replace reverse_mem idx (LocSet.add key orig)
-  in
-  SESet.iter (fun elt -> try summarize elt with Escape -> ()) set
-
-let lookup_mem key =
-  let _, context = key in
-  find (find memory context) key
-
-let update_mem key data =
-  let _, context = key in
-  let memory =
-    match find memory context with
-    | exception Not_found ->
-      let tbl = create 10 in
-      add memory !current_module tbl;
-      tbl
-    | tbl -> tbl
-  in
-  let set = SESet.of_list data in
-  update_reverse_mem key set;
-  if mem memory key then
-    let original = find memory key in
-    replace memory key (SESet.union original set)
-  else add memory key set
-
-let list_to_array l =
-  let len = List.length l in
-  if len = 0 then [||]
-  else
-    let arr = Array.make len (List.hd l) in
-    let i = ref 0 in
-    let l = ref l in
-    while !l <> [] do
-      match !l with
-      | hd :: tl ->
-        arr.(!i) <- hd;
-        incr i;
-        l := tl
-      | _ -> assert false
-    done;
-    arr
-
-let se_of_var x context =
-  let local_tbl = find var_to_se context in
-  try SESet.elements (find local_tbl x)
-  with Not_found ->
-    if !linking then (
-      try
-        let global_tbl = find var_to_se (CL.Ident.name x) in
-        SESet.elements (find global_tbl x)
-      with Not_found ->
-        if !Common.Cli.debug then
-          prerr_string
-            ("Hey, I can't figure out : " ^ CL.Ident.unique_name x ^ "\n");
-        raise Not_found)
-    else raise Not_found
-
+(** Tracks the number of expressions labelled for each file *)
 let expression_label : (string, int) t = create 10
+
 let label_to_summary : (loc, code_loc) t = create 10
 let summary_to_label : (code_loc, loc) t = create 10
+
+let new_temp_var () =
+  let mod_name = !current_module in
+  let temp =
+    match find expression_label mod_name with
+    | exception Not_found ->
+      add expression_label mod_name 0;
+      0
+    | lbl ->
+      replace expression_label mod_name (lbl + 1);
+      lbl + 1
+  in
+  let lbl = (temp, mod_name) in
+  add label_to_summary lbl Temp;
+  Val lbl
 
 let loc_of_summary summary =
   match find summary_to_label summary with
@@ -392,9 +151,8 @@ let loc_of_mod mod_expr =
   in
   loc_of_summary summary
 
-let expr_of_mod me = Expr (loc_of_mod me)
-let val_of_mod me = Var (Val (expr_of_mod me))
-let packet_of_mod me = Var (Packet (expr_of_mod me))
+let val_of_mod me = Val (loc_of_mod me)
+let packet_of_mod me = Packet (loc_of_mod me)
 
 let loc_of_expr expr =
   let summary =
@@ -407,185 +165,156 @@ let loc_of_expr expr =
   in
   loc_of_summary summary
 
-let expr_of_expr e = Expr (loc_of_expr e)
-let val_of_expr e = Var (Val (expr_of_expr e))
-let packet_of_expr e = Var (Packet (expr_of_expr e))
+let val_of_expr e = Val (loc_of_expr e)
+let packet_of_expr e = Packet (loc_of_expr e)
 
-(* for resolution *)
-let changed = ref false
-let prev_worklist : Worklist.t = create 10
-let exn_of_file = create 10
+(** For updating set constraints *)
 
-module GE = struct
-  type t = pattern se
+module SESet = Set.Make (struct
+  type t = value se
 
   let compare = compare
+end)
+
+module Worklist = struct
+  type t = SESet.t ref
+
+  let add x (worklist : t) = worklist := SESet.add x !worklist
+  let mem x (worklist : t) = SESet.mem x !worklist
+
+  let prepare_step (worklist : t) (prev_worklist : t) =
+    prev_worklist := !worklist;
+    worklist := SESet.empty
 end
 
-module GESet = struct
-  module Internal = Set.Make (GE)
+let worklist : Worklist.t = ref SESet.empty
+let prev_worklist : Worklist.t = ref SESet.empty
+let sc : (value se, SESet.t) t = create 10
+let reverse_sc : (value se, SESet.t) t = create 10
+let changed = ref false
+let lookup_sc se = try find sc se with Not_found -> SESet.empty
 
-  type t = Set of Internal.t | Total
+type var_se_tbl = (string, (CL.Ident.t, tagged_expr) t) t
 
-  let empty = Set Internal.empty
+let global_env : var_se_tbl = create 10
+let unresolved_ids : (CL.Ident.t, unit) t = create 10
 
-  let mem (x : pattern se) (set : t) =
-    match set with Total -> true | Set s -> Internal.mem x s
+(** lookup the identifier x called from module ctx under env, raises [Not_found] when the appropriate expr is not found *)
+let lookup_id (x, ctx) =
+  let local_tbl = Hashtbl.find global_env ctx in
+  try Hashtbl.find local_tbl x
+  with Not_found -> (
+    let linking_tbl = Hashtbl.find global_env (CL.Ident.name x) in
+    try Hashtbl.find linking_tbl x
+    with Not_found ->
+      (* record unresolved identifier *)
+      replace unresolved_ids x ();
+      raise Not_found)
 
-  let add (x : pattern se) (set : t) =
-    match (x, set) with
-    | Top, _ -> Total
-    | _, Total -> Total
-    | _, Set s -> Set (Internal.add x s)
+exception Escape
 
-  let inter (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> s1
-    | Total, _ -> s2
-    | Set s1, Set s2 -> Set (Internal.inter s1 s2)
+let update_worklist key set =
+  let summarize elt =
+    let idx =
+      match elt with
+      | App_v (e, (Some _ :: _ | []))
+      | App_p (e, (Some _ :: _ | []))
+      | Fld (e, _)
+      | Diff (e, _) ->
+        Worklist.add (Var e) worklist;
+        Var e
+      | Var _ | Loc _ | Id _ ->
+        Worklist.add elt worklist;
+        elt
+      | _ -> raise Escape
+    in
+    match find reverse_sc idx with
+    | exception Not_found -> add reverse_sc idx (SESet.singleton key)
+    | orig -> replace reverse_sc idx (SESet.add key orig)
+  in
+  match key with
+  | Fld (e, _) -> summarize (Var e)
+  | Loc _ | Var _ ->
+    Worklist.add key worklist;
+    SESet.iter (fun se -> try summarize se with Escape -> ()) set
+  | _ -> failwith "Invalid LHS"
 
-  let union (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> Total
-    | Total, _ -> Total
-    | Set s1, Set s2 -> Set (Internal.union s1 s2)
+let update_sc lhs added =
+  let original = lookup_sc lhs in
+  let diff = SESet.diff added original in
+  if not (SESet.is_empty diff) then (
+    changed := true;
+    update_worklist lhs diff;
+    replace sc lhs (SESet.union original diff))
 
-  let diff (s1 : t) (s2 : t) =
-    match (s1, s2) with
-    | _, Total -> Set Internal.empty
-    | Total, _ -> Total
-    | Set s1, Set s2 -> Set (Internal.diff s1 s2)
+let get_context = function
+  | Fld ((Packet (_, ctx) | Val (_, ctx)), _)
+  | Var (Packet (_, ctx) | Val (_, ctx))
+  | Loc (_, ctx) ->
+    ctx
+  | _ -> failwith "Not a valid LHS"
 
-  let is_empty = function Total -> false | Set s -> Internal.is_empty s
-  let elements = function Total -> [Top] | Set s -> Internal.elements s
-  let of_list l = if List.mem Top l then Total else Set (Internal.of_list l)
+(* enforce data to be nonempty *)
+let init_sc lhs data =
+  if data = [] then ()
+  else
+    let set = SESet.of_list data in
+    update_worklist lhs set;
+    match find sc lhs with
+    | exception Not_found -> add sc lhs set
+    | original -> replace sc lhs (SESet.union original set)
 
-  let filter f = function
-    | Total -> if f Top then Total else empty
-    | Set s -> Set (Internal.filter f s)
-
-  let iter f = function Total -> f Top | Set s -> Internal.iter f s
-
-  let fold f set acc =
-    match set with Total -> f Top acc | Set s -> Internal.fold f s acc
-
-  let singleton = function Top -> Total | x -> Set (Internal.singleton x)
-
-  let map f = function
-    | Total ->
-      let elt = f Top in
-      singleton elt
-    | Set s ->
-      let set = Internal.map f s in
-      if Internal.mem Top set then Total else Set set
-end
-
-let update_l l idx =
-  match find affected_vars l with
+let init_id id expr =
+  match find global_env !current_module with
   | exception Not_found ->
-    let new_tbl = create 1 in
-    add new_tbl idx ();
-    add affected_vars l new_tbl
-  | original -> Worklist.add idx original
+    let tbl = create 10 in
+    add tbl id expr;
+    add global_env !current_module tbl
+  | tbl -> replace tbl id expr
 
-let update_worklist_g key set =
-  let for_each_loc = function
-    | Loc (l, None) -> update_l l (hash key)
-    | _ -> ()
-  in
-  let summarize = function
-    | Ctor_pat (_, arr) -> List.iter for_each_loc arr
-    | Arr_pat l -> update_l l (hash key)
-    | _ -> ()
-  in
-  GESet.iter summarize set;
-  Worklist.add (hash key) worklist
+let list_to_array l =
+  let len = List.length l in
+  if len = 0 then [||]
+  else
+    let arr = Array.make len (List.hd l) in
+    let i = ref 0 in
+    let l = ref l in
+    while !l <> [] do
+      match !l with
+      | hd :: tl ->
+        arr.(!i) <- hd;
+        incr i;
+        l := tl
+      | _ -> assert false
+    done;
+    arr
+
+(* for resolution *)
+let rec val_of_path = function
+  | CL.Path.Papply (f, x) ->
+    let f = val_of_path f in
+    let x = val_of_path x in
+    let temp = new_temp_var () in
+    init_sc (Var temp) [App_v (f, [Some x])];
+    temp
+  | ((CL.Path.Pdot (x, fld, _)) [@if ocaml_version < (4, 08, 0) || defined npm])
+    ->
+    let x = val_of_path x in
+    let temp = new_temp_var () in
+    init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
+    temp
+  | ((CL.Path.Pdot (x, fld))
+  [@if ocaml_version >= (4, 08, 0) && not_defined npm]) ->
+    let x = val_of_path x in
+    let temp = new_temp_var () in
+    init_sc (Var temp) [Fld (x, (Some fld, Some 0))];
+    temp
+  | CL.Path.Pident x ->
+    let temp = new_temp_var () in
+    init_sc (Var temp) [Id (x, !current_module)];
+    temp
+
+let exn_of_file = create 10
 
 let update_exn_of_file (key : string) (data : value se list) =
   add exn_of_file key data
-
-let update_c key set =
-  let context = try get_context key with _ -> get_context_fld key in
-  let sc = find sc context in
-  if mem sc key then
-    let original = find sc key in
-    let diff = SESet.diff set original in
-    if SESet.is_empty diff then false
-    else (
-      replace sc key (SESet.union original diff);
-      update_worklist (SESet.singleton key);
-      update_worklist diff;
-      update_reverse_sc key diff;
-      changed := true;
-      true)
-  else (
-    add sc key set;
-    update_worklist (SESet.singleton key);
-    update_worklist set;
-    update_reverse_sc key set;
-    changed := true;
-    true)
-
-let consult_affected_vars key =
-  match find affected_vars key with
-  | exception Not_found -> ()
-  | affected -> iter (fun x () -> Worklist.add x worklist) affected
-
-let update_loc key set =
-  let _, context = key in
-  let memory = find memory context in
-  if mem memory key then
-    let original = find memory key in
-    let diff = SESet.diff set original in
-    if SESet.is_empty diff then false
-    else (
-      replace memory key (SESet.union original diff);
-      update_worklist diff;
-      consult_affected_vars key;
-      update_reverse_mem key diff;
-      changed := true;
-      true)
-  else (
-    add memory key set;
-    update_worklist set;
-    consult_affected_vars key;
-    update_reverse_mem key set;
-    changed := true;
-    true)
-
-let grammar : (pattern se, GESet.t) t = create 256
-
-let update_g var set =
-  let key = Var var in
-  if mem grammar key then
-    let original = find grammar key in
-    let diff = GESet.diff set original in
-    if GESet.is_empty diff then false
-    else (
-      replace grammar key (GESet.union original diff);
-      update_worklist_g key diff;
-      changed := true;
-      true)
-  else (
-    add grammar key set;
-    update_worklist_g key set;
-    changed := true;
-    true)
-
-let abs_mem : (loc, GESet.t) t = create 256
-
-let update_abs_loc key set =
-  if mem abs_mem key then
-    let original = find abs_mem key in
-    let diff = GESet.diff set original in
-    if GESet.is_empty diff then false
-    else (
-      replace abs_mem key (GESet.union original diff);
-      consult_affected_vars key;
-      changed := true;
-      true)
-  else (
-    add abs_mem key set;
-    consult_affected_vars key;
-    changed := true;
-    true)

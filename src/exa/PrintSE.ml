@@ -14,34 +14,25 @@ let print_code_loc loc =
   CL.Location.print_loc Format.str_formatter loc;
   prerr_string (Format.flush_str_formatter ())
 
-let print_loc loc =
-  match Hashtbl.find label_to_summary loc with
+let print_loc (i, str) =
+  match Hashtbl.find label_to_summary (i, str) with
   | Expr_loc e -> print_code_loc e.exp_loc
   | Mod_loc m -> print_code_loc m.mod_loc
   | Bop_loc t -> print_code_loc t.val_loc
+  | Temp -> prerr_string ("temp_" ^ str ^ "_" ^ string_of_int i)
 
 let print_param = function
   | None -> ()
   | Some (x, _) -> prerr_string (CL.Ident.name x)
 
-let print_expr : type k. k expr -> unit = function
-  | Expr_var (p, _) ->
-    prerr_string "Expr_var (";
-    prerr_string (CL.Ident.name p);
-    prerr_string ")"
-  | Expr loc ->
-    prerr_string "Expr (";
-    print_loc loc;
-    prerr_string ")"
-
-let print_tagged_expr : _ tagged_expr -> unit = function
+let print_tagged_expr : tagged_expr -> unit = function
   | Val v ->
     prerr_string "Val (";
-    print_expr v;
+    print_loc v;
     prerr_string ")"
   | Packet p ->
     prerr_string "Packet (";
-    print_expr p;
+    print_loc p;
     prerr_string ")"
 
 let rec print_se : value se -> unit = function
@@ -57,33 +48,44 @@ let rec print_se : value se -> unit = function
     prerr_string "X (";
     print_tagged_expr e;
     prerr_string ")"
-  | App_V (se, list) ->
+  | Prim_v ({prim_name}, list) ->
+    prerr_string "PrimV (";
+    prerr_string prim_name;
+    prerr_string ", ";
+    print_option_list_with_separator list ";";
+    prerr_string ")"
+  | Prim_p ({prim_name}, list) ->
+    prerr_string "PrimP (";
+    prerr_string prim_name;
+    prerr_string ", ";
+    print_option_list_with_separator list ";";
+    prerr_string ")"
+  | App_v (e, list) ->
     prerr_string "AppV (";
-    print_se se;
+    print_tagged_expr e;
     prerr_string ", ";
     print_option_list_with_separator list ";";
     prerr_string ")"
-  | App_P (se, list) ->
+  | App_p (e, list) ->
     prerr_string "AppP (";
-    print_se se;
+    print_tagged_expr e;
     prerr_string ", ";
     print_option_list_with_separator list ";";
     prerr_string ")"
-  | Ctor (k, Static arr) ->
+  | Ctor (k, arr) ->
     prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some s -> prerr_string s);
+    (match k with None -> prerr_string "-" | Some s -> prerr_string s);
     prerr_string ", ";
     print_list_with_separator arr ";";
     prerr_string ")"
-  | Ctor (k, Dynamic (i, _)) ->
-    prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some s -> prerr_string s);
+  | Arr (i, _) ->
+    prerr_string "Arr (";
     prerr_string "malloc ";
     prerr_string (string_of_int i);
     prerr_string ")"
-  | Fld (se, lbl) ->
+  | Fld (e, lbl) ->
     prerr_string "Fld (";
-    print_se se;
+    print_tagged_expr e;
     prerr_string ", (";
     (match lbl with
     | None, Some i ->
@@ -95,40 +97,25 @@ let rec print_se : value se -> unit = function
       prerr_int i
     | _, None -> prerr_string " , ");
     prerr_string "))"
+  | Loc (i, _) -> prerr_string ("!ℓ_" ^ string_of_int i)
   | Diff (x, y) ->
     prerr_string "(";
-    print_se x;
+    print_tagged_expr x;
     prerr_string ")-(";
     print_pattern y;
     prerr_string ")"
+  | Id (x, _) -> prerr_string (CL.Ident.unique_name x)
   | _ -> ()
 
 and print_pattern : pattern se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Const_top -> prerr_string "⊤"
-  | Var e ->
-    prerr_string "X (";
-    print_tagged_expr e;
-    prerr_string ")"
   | Ctor_pat (k, arr) ->
     prerr_string "Ctor (";
     (match k with None -> prerr_string " " | Some s -> prerr_string s);
     prerr_string ", ";
     print_pattern_list_with_separator arr ";";
     prerr_string ")"
-  | Arr_pat (i, _) ->
-    prerr_string "Arr (";
-    prerr_string "ℓ_";
-    print_int i;
-    prerr_string ")"
-  | Loc ((i, name), p) -> (
-    match p with
-    | Some p -> print_pattern p
-    | _ ->
-      prerr_string "ℓ_";
-      prerr_int i;
-      to_be_explained := LocSet.add (i, name) !to_be_explained)
   | _ -> ()
 
 and print_ses (xs : value se list) =
@@ -171,7 +158,7 @@ and print_expr_list_with_separator l sep =
     match !l' with
     | hd :: tl ->
       prerr_string "(";
-      print_expr hd;
+      print_loc hd;
       prerr_string ")";
       if tl <> [] then prerr_string sep;
       l' := tl
@@ -186,7 +173,7 @@ and print_option_list_with_separator l sep =
     match !l' with
     | Some hd :: tl ->
       prerr_string "(";
-      print_se hd;
+      print_tagged_expr hd;
       prerr_string ")";
       if tl <> [] then prerr_string sep;
       l' := tl
@@ -203,7 +190,8 @@ and print_list_with_separator l sep =
   while !l' <> [] do
     match !l' with
     | hd :: tl ->
-      prerr_int (fst hd);
+      prerr_string "ℓ_";
+      prerr_int (fst (fst hd));
       if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
@@ -218,111 +206,59 @@ let show_se_with_separator set sep =
       prerr_newline ())
     set
 
-let show_pattern_with_separator set sep =
-  GESet.iter
-    (fun x ->
-      prerr_string sep;
-      print_pattern x;
-      prerr_newline ())
-    set
-
 let show_var_se_tbl (var_to_se : var_se_tbl) =
   Hashtbl.iter
     (fun _ tbl ->
       Hashtbl.iter
-        (fun x se ->
+        (fun x e ->
           prerr_string "var_to_se :\n ident = ";
           prerr_string (CL.Ident.unique_name x);
           prerr_string "\n se = ";
-          prerr_newline ();
-          show_se_with_separator se "\t";
+          print_tagged_expr e;
           prerr_newline ())
         tbl)
     var_to_se
 
-let show_mem (mem : (string, (loc, SESet.t) Hashtbl.t) Hashtbl.t) =
-  Hashtbl.iter
-    (fun _ mem ->
-      Hashtbl.iter
-        (fun (key, _) data ->
-          if SESet.is_empty data then ()
-          else (
-            prerr_string "mem :\n";
-            prerr_int key;
-            prerr_newline ();
-            show_se_with_separator data "\t";
-            prerr_newline ()))
-        mem)
-    mem
-
-let show_sc_tbl (tbl : (string, (value se, SESet.t) Hashtbl.t) Hashtbl.t) =
-  Hashtbl.iter
-    (fun _ tbl ->
-      Hashtbl.iter
-        (fun key data ->
-          if SESet.is_empty data then ()
-          else (
-            prerr_string "sc :\n";
-            print_se key;
-            (match key with
-            | Fld (_, _) -> prerr_string " <- "
-            | _ -> prerr_string " = ");
-            prerr_newline ();
-            show_se_with_separator data "\t";
-            prerr_newline ()))
-        tbl)
-    tbl
-
-let show_grammar (g : (pattern se, GESet.t) Hashtbl.t) =
+let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
-      if GESet.is_empty data then ()
+      if SESet.is_empty data then ()
       else (
-        prerr_string "grammar :\n";
-        print_pattern key;
-        prerr_string " = ";
+        prerr_string "sc :\n";
+        print_se key;
+        (match key with
+        | Fld (_, _) -> prerr_string " <- "
+        | _ -> prerr_string " = ");
         prerr_newline ();
-        show_pattern_with_separator data "\t";
+        show_se_with_separator data "\t";
         prerr_newline ()))
-    g
-
-let show_abs_mem (a : (loc, GESet.t) Hashtbl.t) =
-  Hashtbl.iter
-    (fun (key, _) data ->
-      if GESet.is_empty data then ()
-      else (
-        prerr_string "abs_mem :\n";
-        prerr_int key;
-        prerr_string " = ";
-        prerr_newline ();
-        show_pattern_with_separator data "\t";
-        prerr_newline ()))
-    a
+    tbl
 
 let tracked_vars = Hashtbl.create 10
 let track_path = ref false
+let filter_exns = function Top | Ctor _ -> true | _ -> false
 
-let rec track_exception (x : value se) (exn : pattern se) =
+let rec track_exception (x : value se) (exn : value se) =
   let propagate = function
     | Var x -> (
-      let exns = try Hashtbl.find grammar (Var x) with _ -> GESet.empty in
+      let exns =
+        try SESet.filter filter_exns (lookup_sc (Var x)) with _ -> SESet.empty
+      in
       let filter p =
-        exn = p
-        ||
         match exn with
-        | Ctor_pat (k, _) -> (
+        | Ctor (k, _) -> (
           match p with Ctor_pat (k', _) -> k = k' | _ -> false)
         | _ -> false
       in
-      let filtered = GESet.filter filter exns in
-      if not (GESet.is_empty filtered) then
+      let filtered = SESet.filter filter exns in
+      if not (SESet.is_empty filtered) then
         let () =
           if !track_path then (
             print_tagged_expr x;
             prerr_newline ())
         in
         match x with
-        | Val (Expr e) ->
+        | Val e ->
           prerr_string "  raised from: ";
           print_loc e;
           prerr_newline ()
@@ -330,7 +266,7 @@ let rec track_exception (x : value se) (exn : pattern se) =
           SESet.iter
             (function
               | Var x -> track_exception (Var x) exn
-              | Diff (Var x, _) -> track_exception (Var x) exn
+              | Diff (x, _) -> track_exception (Var x) exn
               | _ -> ())
             (lookup_sc (Var x)))
     | _ -> assert false
@@ -346,11 +282,14 @@ let explain_abs_mem () =
     prerr_endline " Where abstract locations contain:";
   LocSet.iter
     (fun (i, name) ->
-      let set = try Hashtbl.find abs_mem (i, name) with _ -> GESet.empty in
+      let set =
+        try SESet.filter filter_exns (lookup_sc (Loc (i, name)))
+        with _ -> SESet.empty
+      in
       prerr_string " ℓ_";
       prerr_int i;
       prerr_string ":\n";
-      show_pattern_with_separator set "  ")
+      show_se_with_separator set "  ")
     !to_be_explained;
   to_be_explained := LocSet.empty
 
@@ -366,18 +305,18 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
         let () =
           List.iter
             (function
-              | Var (Packet (Expr loc)) ->
+              | Var (Packet loc) ->
                 let set =
-                  try Hashtbl.find grammar (Var (Packet (Expr loc)))
-                  with _ -> GESet.empty
+                  try SESet.filter filter_exns (lookup_sc (Var (Packet loc)))
+                  with _ -> SESet.empty
                 in
-                if GESet.is_empty set then ()
+                if SESet.is_empty set then ()
                 else (
                   printed := true;
                   prerr_string " Escaped from ";
                   print_loc loc;
                   prerr_endline ":";
-                  GESet.iter
+                  SESet.iter
                     (function
                       | Ctor_pat (Some ctor, l) as exn ->
                         track_path := ctor = !Common.Cli.ctor_to_track;
@@ -385,14 +324,14 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
                         print_pattern_list_with_separator l ";";
                         prerr_string ":\n";
                         Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet (Expr loc))) exn;
+                        track_exception (Var (Packet loc)) exn;
                         explain_abs_mem ()
                       | exn ->
                         prerr_string " ";
-                        print_pattern exn;
+                        print_se exn;
                         prerr_string ":\n";
                         Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet (Expr loc))) exn)
+                        track_exception (Var (Packet loc)) exn)
                     set;
                   prerr_newline ())
               | _ -> ())
@@ -404,34 +343,26 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
   Hashtbl.iter
-    (fun _ tbl ->
-      Hashtbl.iter
-        (fun key data ->
-          let set =
-            SESet.filter
-              (fun x ->
-                match x with
-                | App_V (_, _) | Fn (_, _) | Prim _ -> true
-                | _ -> false)
-              data
-          in
-          if SESet.is_empty set then ()
-          else (
-            print_se key;
-            prerr_newline ();
-            show_se_with_separator set "\t";
-            prerr_newline ()))
-        tbl)
+    (fun key data ->
+      let set =
+        SESet.filter
+          (fun x ->
+            match x with
+            | App_v (_, _) | Fn (_, _) | Prim _ -> true
+            | _ -> false)
+          data
+      in
+      if SESet.is_empty set then ()
+      else (
+        print_se key;
+        prerr_newline ();
+        show_se_with_separator set "\t";
+        prerr_newline ()))
     tbl
 
 let print_sc_info () =
-  show_mem memory;
-  show_var_se_tbl var_to_se;
+  show_var_se_tbl global_env;
   show_sc_tbl sc
-
-let print_grammar () =
-  show_abs_mem abs_mem;
-  show_grammar grammar
 
 let print_exa () =
   Format.flush_str_formatter () |> ignore;
