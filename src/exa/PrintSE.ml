@@ -38,6 +38,12 @@ let print_tagged_expr : tagged_expr -> unit = function
 let rec print_se : value se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
+  | Ctor_pat (k, arr) ->
+    prerr_string "Ctor (";
+    (match k with None -> prerr_string "-" | Some s -> prerr_string s);
+    prerr_string ", ";
+    print_pattern_list_with_separator arr ";";
+    prerr_string ")"
   | Fn (p, list) ->
     prerr_string "λ";
     print_param p;
@@ -105,18 +111,8 @@ let rec print_se : value se -> unit = function
     print_pattern y;
     prerr_string ")"
   | Id (x, _) -> prerr_string (CL.Ident.unique_name x)
-  | _ -> ()
 
-and print_pattern : pattern se -> unit = function
-  | Top -> prerr_string "⊤"
-  | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Ctor_pat (k, arr) ->
-    prerr_string "Ctor (";
-    (match k with None -> prerr_string " " | Some s -> prerr_string s);
-    prerr_string ", ";
-    print_pattern_list_with_separator arr ";";
-    prerr_string ")"
-  | _ -> ()
+and print_pattern p = print_se (pat_to_val p)
 
 and print_ses (xs : value se list) =
   prerr_string "[";
@@ -236,7 +232,10 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
 
 let tracked_vars = Hashtbl.create 10
 let track_path = ref false
-let filter_exns = function Top | Ctor _ -> true | _ -> false
+
+let filter_exns = function
+  | Top | Const _ | Ctor_pat _ | Ctor _ -> true
+  | _ -> false
 
 let rec track_exception (x : value se) (exn : value se) =
   let propagate = function
@@ -246,8 +245,9 @@ let rec track_exception (x : value se) (exn : value se) =
       in
       let filter p =
         match exn with
-        | Ctor (k, _) -> (
-          match p with Ctor_pat (k', _) -> k = k' | _ -> false)
+        | Ctor_pat (k, _) | Ctor (k, _) -> (
+          match p with Ctor_pat (k', _) | Ctor (k', _) -> k = k' | _ -> false)
+        | Top -> p = Top
         | _ -> false
       in
       let filtered = SESet.filter filter exns in
@@ -318,14 +318,24 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
                   prerr_endline ":";
                   SESet.iter
                     (function
+                      | Ctor (Some ctor, l) as exn ->
+                        track_path := ctor = !Common.Cli.ctor_to_track;
+                        prerr_string (" " ^ ctor ^ " with arguments ");
+                        print_list_with_separator l ";";
+                        prerr_string ":\n";
+                        List.iter
+                          (fun (l, _) ->
+                            to_be_explained := LocSet.add l !to_be_explained)
+                          l;
+                        Hashtbl.clear tracked_vars;
+                        track_exception (Var (Packet loc)) exn
                       | Ctor_pat (Some ctor, l) as exn ->
                         track_path := ctor = !Common.Cli.ctor_to_track;
                         prerr_string (" " ^ ctor ^ " with arguments ");
                         print_pattern_list_with_separator l ";";
                         prerr_string ":\n";
                         Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet loc)) exn;
-                        explain_abs_mem ()
+                        track_exception (Var (Packet loc)) exn
                       | exn ->
                         prerr_string " ";
                         print_se exn;
@@ -338,7 +348,8 @@ let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
             data
         in
         if !printed then () else prerr_string " No escaping exceptions\n\n")
-    tbl
+    tbl;
+  explain_abs_mem ()
 
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";

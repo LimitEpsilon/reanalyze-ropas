@@ -12,78 +12,17 @@ let rec merge_args = function
   | Some x :: tl, l -> Some x :: merge_args (tl, l)
 
 (* arrays or external functions returning records cannot be filtered *)
-let allocated = Hashtbl.create 10
-
-let value_prim = function
-  | {CL.Primitive.prim_name = "%revapply"}, [Some x; Some y] ->
-    SESet.singleton (App_v (y, [Some x]))
-  | {CL.Primitive.prim_name = "%apply"}, [Some x; Some y] ->
-    SESet.singleton (App_v (x, [Some y]))
-  | {CL.Primitive.prim_name = "%identity" | "%opaque"}, [Some x] ->
-    SESet.singleton (Var x)
-  | {CL.Primitive.prim_name = "%ignore"}, [Some _] ->
-    SESet.singleton (Ctor (Some "()", []))
-  | {CL.Primitive.prim_name = "%field0"}, [Some x] ->
-    SESet.singleton (Fld (x, (None, Some 0)))
-  | {CL.Primitive.prim_name = "%field1"}, [Some x] ->
-    SESet.singleton (Fld (x, (None, Some 1)))
-  | {CL.Primitive.prim_name = "%setfield0"}, [Some x; Some y] ->
-    update_sc (Fld (x, (None, Some 0))) (SESet.singleton (Var y));
-    SESet.singleton (Ctor (Some "()", []))
-  | {CL.Primitive.prim_name = "%makemutable"}, [Some x] -> (
-    let value = SESet.singleton (Var x) in
-    match Hashtbl.find allocated x with
-    | exception Not_found ->
-      let i = new_memory (get_context (Var x)) in
-      Hashtbl.add allocated x i;
-      update_sc (Loc i) value;
-      SESet.singleton (Ctor (None, [(i, None)]))
-    | i ->
-      update_sc (Loc i) value;
-      SESet.singleton (Ctor (None, [(i, None)])))
-  | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
-    SESet.singleton (App_v (x, []))
-  | ( {
-        CL.Primitive.prim_name =
-          ( "%eq" | "%noteq" | "%ltint" | "%leint" | "%gtint" | "%geint"
-          | "%eqfloat" | "%noteqfloat" | "%ltfloat" | "%lefloat" | "%gtfloat"
-          | "%gefloat" | "%equal" | "%notequal" | "%lessequal" | "%lessthan"
-          | "%greaterequal" | "%greaterthan" | "%compare" | "%boolnot"
-          | "%sequand" | "%sequor" );
-      },
-      _ ) ->
-    SESet.of_list [Ctor (Some "true", []); Ctor (Some "false", [])]
-  | ( {
-        CL.Primitive.prim_name =
-          "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
-      },
-      _ ) ->
-    SESet.empty
-  | _ -> SESet.singleton Top
-
-let packet_prim = function
-  | {CL.Primitive.prim_name = "%revapply"}, [Some x; Some y] ->
-    SESet.singleton (App_p (y, [Some x]))
-  | {CL.Primitive.prim_name = "%apply"}, [Some x; Some y] ->
-    SESet.singleton (App_p (x, [Some y]))
-  | {CL.Primitive.prim_name = "%lazy_force"}, [Some x] ->
-    SESet.singleton (App_p (x, []))
-  | ( {
-        CL.Primitive.prim_name =
-          "%raise" | "%reraise" | "%raise_notrace" | "%raise_with_backtrace";
-      },
-      Some x :: _ ) ->
-    SESet.singleton (Var x)
-  | {CL.Primitive.prim_name = "caml_sys_exit"}, _ ->
-    SESet.singleton (Ctor (Some "Exit", []))
-  | _ -> SESet.empty
-
 let time_spent_in_var = ref 0.0
 let time_spent_in_filter = ref 0.0
 let time_spent_in_fld = ref 0.0
 let time_spent_in_closure = ref 0.0
 let time_spent_in_update = ref 0.0
 let time_spent_in_const = ref 0.0
+let temp_timer = ref 0.0
+let start_timer () = temp_timer := Unix.gettimeofday ()
+
+let stop_timer measure =
+  measure := !measure +. (Unix.gettimeofday () -. !temp_timer)
 
 let elaborate_app f hd tl =
   match f with
@@ -99,13 +38,13 @@ let elaborate_app f hd tl =
     value
   | Prim p ->
     let args = Some hd :: tl in
-    if arg_len args = p.prim_arity then value_prim (p, args)
+    if arg_len args = p.prim_arity then PrimResolution.value_prim (p, args)
     else SESet.singleton (Prim_v (p, args))
   | App_v (e, None :: tl') ->
     SESet.singleton (App_v (e, Some hd :: merge_args (tl', tl)))
   | Prim_v (p, args) when arg_len args < p.prim_arity ->
     let args = merge_args (args, Some hd :: tl) in
-    if arg_len args = p.prim_arity then value_prim (p, args)
+    if arg_len args = p.prim_arity then PrimResolution.value_prim (p, args)
     else SESet.singleton (Prim_v (p, args))
   | _ -> SESet.empty
 
@@ -123,12 +62,14 @@ let elaborate_app_p f hd tl =
     packet
   | Prim p ->
     let args = Some hd :: tl in
-    if arg_len args = p.prim_arity then packet_prim (p, args) else SESet.empty
+    if arg_len args = p.prim_arity then PrimResolution.packet_prim (p, args)
+    else SESet.empty
   | App_v (e, None :: tl') ->
     SESet.singleton (App_p (e, Some hd :: merge_args (tl', tl)))
   | Prim_v (p, args) when arg_len args < p.prim_arity ->
     let args = merge_args (args, Some hd :: tl) in
-    if arg_len args = p.prim_arity then packet_prim (p, args) else SESet.empty
+    if arg_len args = p.prim_arity then PrimResolution.packet_prim (p, args)
+    else SESet.empty
   | _ -> SESet.empty
 
 let elaborate_lazy f =
@@ -150,7 +91,21 @@ let elaborate_fld se fld =
     | kappa', Some i -> (
       try
         if kappa = kappa' then
-          let ith = Loc (fst (List.nth l i)) in
+          let ith =
+            match List.nth l i with
+            | l, None -> Loc l
+            | _, Some p -> pat_to_val p
+          in
+          SESet.singleton ith
+        else SESet.empty
+      with _ -> SESet.empty)
+    | _ -> SESet.empty)
+  | Ctor_pat (kappa, l) -> (
+    match fld with
+    | kappa', Some i -> (
+      try
+        if kappa = kappa' then
+          let ith = pat_to_val (List.nth l i) in
           SESet.singleton ith
         else SESet.empty
       with _ -> SESet.empty)
@@ -192,7 +147,7 @@ and diff_pat_list (rev_hd, tl) tl' =
   | [], [] -> []
   | hd :: tl1, hd' :: tl2 ->
     let diff = filter_pat (pat_to_val hd, hd') in
-    let inter = hd' (* unsafe *) in
+    let inter = hd' in
     let diff_rest = diff_pat_list (inter :: rev_hd, tl1) tl2 in
     SESet.fold
       (fun x acc ->
@@ -235,12 +190,10 @@ and diff_list (rev_hd, tl) tl' =
       diff diff_rest
   | _ -> assert false
 
-let use_worklist = true
-
 (** given a collection of set expressions under env, elaborate upon possible expressions *)
 let elaborate se =
   match se with
-  | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
+  | Top | Const _ | Ctor_pat _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | App_p (_, None :: _)
   | Prim_v _ | Prim_p _ ->
@@ -250,53 +203,84 @@ let elaborate se =
       let bound = lookup_id x in
       SESet.singleton (Var bound)
     with Not_found -> SESet.empty)
-  | App_v (e, Some e' :: tl)
-    when (not use_worklist) || Worklist.mem (Var e) prev_worklist ->
+  | App_v (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let to_add = elaborate_app se e' tl in
+        stop_timer time_spent_in_closure;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | App_p (e, Some e' :: tl)
-    when (not use_worklist) || Worklist.mem (Var e) prev_worklist ->
+  | App_p (e, Some e' :: tl) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let to_add = elaborate_app_p se e' tl in
+        stop_timer time_spent_in_closure;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | App_v (e, []) when (not use_worklist) || Worklist.mem (Var e) prev_worklist
-    ->
+  | App_v (e, []) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let to_add = elaborate_lazy se in
+        stop_timer time_spent_in_closure;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | App_p (e, []) when (not use_worklist) || Worklist.mem (Var e) prev_worklist
-    ->
+  | App_p (e, []) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let to_add = elaborate_lazy_p se in
+        stop_timer time_spent_in_closure;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | Fld (e, fld) when (not use_worklist) || Worklist.mem (Var e) prev_worklist
-    ->
+  | Fld (e, fld) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let to_add = elaborate_fld se fld in
+        stop_timer time_spent_in_fld;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | Diff (e, p) when (not use_worklist) || Worklist.mem (Var e) prev_worklist ->
+  | Diff (e, p) when Worklist.mem (Var e) prev_worklist ->
     SESet.fold
       (fun se acc ->
+        start_timer ();
         let filtered = filter_pat (se, p) in
+        stop_timer time_spent_in_filter;
         SESet.union filtered acc)
       (SESet.filter propagate (lookup_sc (Var e)))
       SESet.empty
-  | Var e when (not use_worklist) || Worklist.mem (Var e) prev_worklist ->
-    SESet.filter propagate (lookup_sc (Var e))
-  | Loc l when (not use_worklist) || Worklist.mem (Loc l) prev_worklist ->
-    SESet.filter propagate (lookup_sc (Loc l))
+  | Var e when Worklist.mem (Var e) prev_worklist ->
+    start_timer ();
+    let set = SESet.filter propagate (lookup_sc (Var e)) in
+    stop_timer time_spent_in_var;
+    set
+  | Loc l when Worklist.mem (Loc l) prev_worklist ->
+    start_timer ();
+    let set = SESet.filter propagate (lookup_sc (Loc l)) in
+    stop_timer time_spent_in_var;
+    set
   | _ -> SESet.empty
+
+let back_propagated_vars = Hashtbl.create 10
+
+let rec auxiliary_back_propagate var =
+  match Hashtbl.find back_propagated_vars var with
+  | exception Not_found ->
+    Hashtbl.add back_propagated_vars var ();
+    SESet.iter
+      (function Var x -> auxiliary_back_propagate (Var x) | _ -> ())
+      (try lookup_sc var with _ -> SESet.empty)
+  | () -> ()
+
+let back_propagate var set =
+  Hashtbl.clear back_propagated_vars;
+  auxiliary_back_propagate (Var var);
+  Hashtbl.iter
+    (function Var x -> fun () -> update_sc (Var x) set | _ -> fun () -> ())
+    back_propagated_vars
 
 let step_sc_for_entry x set =
   match x with
@@ -310,29 +294,40 @@ let step_sc_for_entry x set =
     in
     update_sc x elaborated
   | Fld (e, (None, Some i)) ->
+    start_timer ();
     SESet.iter
       (function
-        | Ctor (_, l) -> (
+        | Ctor (k, l) -> (
           try
-            let lhs = Loc (fst (List.nth l i)) in
-            update_sc lhs set
+            match List.nth l i with
+            | loc, Some _ ->
+              let j = ref (-1) in
+              let temp_l =
+                List.fold_left
+                  (fun acc x ->
+                    incr j;
+                    if !j = i then (loc, None) :: acc else x :: acc)
+                  [] l
+              in
+              let temp = Ctor (k, List.rev temp_l) in
+              back_propagate e (SESet.singleton temp)
+            | loc, None -> update_sc (Loc loc) set
           with _ -> ())
         | _ -> ())
-      (lookup_sc (Var e))
+      (lookup_sc (Var e));
+    stop_timer time_spent_in_update
   | _ -> failwith "Invalid LHS"
 
 let step_sc () =
-  if use_worklist then
-    let to_be_reduced =
-      SESet.fold
-        (fun idx acc ->
-          SESet.union
-            (try Hashtbl.find reverse_sc idx with Not_found -> SESet.empty)
-            acc)
-        !prev_worklist SESet.empty
-    in
-    SESet.iter (fun x -> step_sc_for_entry x (lookup_sc x)) to_be_reduced
-  else Hashtbl.iter step_sc_for_entry sc
+  let to_be_reduced =
+    SESet.fold
+      (fun idx acc ->
+        SESet.union
+          (try Hashtbl.find reverse_sc idx with Not_found -> SESet.empty)
+          acc)
+      !prev_worklist SESet.empty
+  in
+  SESet.iter (fun x -> step_sc_for_entry x (lookup_sc x)) to_be_reduced
 
 let prepare_step () =
   changed := false;

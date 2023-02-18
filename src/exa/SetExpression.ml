@@ -240,8 +240,18 @@ let update_worklist key set =
   | _ -> failwith "Invalid LHS"
 
 let update_sc lhs added =
+  let true_if_val x =
+    match val_to_pat x with Some _ -> true | None -> false
+  in
   let original = lookup_sc lhs in
-  let diff = SESet.diff added original in
+  let added_val, added_pat = SESet.partition true_if_val added in
+  let diff_val = SESet.diff added_val original in
+  let diff_pat =
+    if SESet.mem Top original then SESet.empty
+    else if SESet.mem Top added_pat then SESet.singleton Top
+    else SESet.diff added_pat original
+  in
+  let diff = SESet.union diff_val diff_pat in
   if not (SESet.is_empty diff) then (
     changed := true;
     update_worklist lhs diff;
