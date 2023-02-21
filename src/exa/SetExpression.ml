@@ -213,19 +213,34 @@ let lookup_id (x, ctx) =
 
 exception Escape
 
+let to_be_filtered : Worklist.t = ref SESet.empty
+let reverse_mem : (loc, SESet.t) t = create 10
+
 let update_worklist key set =
   let summarize elt =
     let idx =
       match elt with
       | App_v (e, (Some _ :: _ | []))
       | App_p (e, (Some _ :: _ | []))
-      | Fld (e, _)
+      | Fld (e, _) ->
+        Worklist.add (Var e) worklist;
+        Var e
       | Diff (e, _) ->
         Worklist.add (Var e) worklist;
+        Worklist.add (Var e) to_be_filtered;
         Var e
       | Var _ | Loc _ | Id _ ->
         Worklist.add elt worklist;
         elt
+      | Ctor (_, l) ->
+        if Worklist.mem key to_be_filtered then
+          List.iter
+            (fun (l, _) ->
+              match find reverse_mem l with
+              | exception Not_found -> add reverse_mem l (SESet.singleton key)
+              | original -> replace reverse_mem l (SESet.add key original))
+            l;
+        raise Escape
       | _ -> raise Escape
     in
     match find reverse_sc idx with
@@ -234,7 +249,12 @@ let update_worklist key set =
   in
   match key with
   | Fld (e, _) -> summarize (Var e)
-  | Loc _ | Var _ ->
+  | Loc l ->
+    let reverse_set = try find reverse_mem l with Not_found -> SESet.empty in
+    SESet.iter (fun x -> Worklist.add x worklist) reverse_set;
+    Worklist.add key worklist;
+    SESet.iter (fun se -> try summarize se with Escape -> ()) set
+  | Var _ ->
     Worklist.add key worklist;
     SESet.iter (fun se -> try summarize se with Escape -> ()) set
   | _ -> failwith "Invalid LHS"
@@ -328,3 +348,26 @@ let exn_of_file = create 10
 
 let update_exn_of_file (key : string) (data : value se list) =
   add exn_of_file key data
+
+(* let inline_table : (id, SESet.t) Hashtbl.t = create 10 *)
+(* let address_translations : (loc, loc) Hashtbl.t = create 10 *)
+(* let expr_translations : (loc, loc) Hashtbl.t = create 10 *)
+
+(* let need_to_inline x m = *)
+(*   match find inline_table x with *)
+(*   | exception Not_found -> None *)
+(*   | s -> *)
+(*     if SESet.mem m s then Some false *)
+(*     else ( *)
+(*       replace inline_table x (SESet.add m s); *)
+(*       clear inline_translations; *)
+(*       Some true) *)
+
+(* let rec translate x m is_var (lbl, ctx) = *)
+(*   match find inline_translations (lbl, ctx) with *)
+(*   | exception Not_found -> *)
+(*     let inlined = if is_var then 1 else 2 in *)
+(*     let inlined = (inlined, ctx) in *)
+(*     add inline_translations (lbl, ctx) inlined; *)
+(*     inlined *)
+(*   | se -> se *)
