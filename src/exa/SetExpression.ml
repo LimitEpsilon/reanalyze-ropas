@@ -42,36 +42,23 @@ and pattern
 and value
 
 (** set expression type *)
-and _ se =
-  | Top : _ se  (** _ *)
-  | Const : CL.Asttypes.constant -> _ se
-  | Ctor_pat : ctor * pattern se list -> _ se  (** For pattern screening *)
-  | Var : tagged_expr -> value se  (** set variable *)
-  | Loc : loc -> value se  (** !ℓ *)
-  | Id : id -> value se  (** identifiers *)
-  | Prim : CL.Primitive.description -> value se
+and se =
+  | Top  (** _ *)
+  | Const of CL.Asttypes.constant
+  | Var of tagged_expr  (** set variable *)
+  | Loc of loc  (** !ℓ *)
+  | Id of id  (** identifiers *)
+  | Prim of CL.Primitive.description
       (** primitives, later converted to top/fld/arr/ctor *)
-  | Fn : param * loc list -> value se  (** lambda expression *)
-  | App_v : tagged_expr * arg -> value se
-      (** possible values / force when arg = nil *)
-  | Prim_v : CL.Primitive.description * arg -> value se
-  | App_p : tagged_expr * arg -> value se
+  | Fn of param * loc list  (** lambda expression *)
+  | App_v of tagged_expr * arg  (** possible values / force when arg = nil *)
+  | Prim_v of CL.Primitive.description * arg
+  | App_p of tagged_expr * arg
       (** possible exn packets / force when arg = nil *)
-  | Prim_p : CL.Primitive.description * arg -> value se
-  | Ctor : ctor * (loc * pattern se option) list -> value se
-      (** One ADT to rule them all :D *)
-  | Arr : loc -> value se  (** Dynamically allocated arrays *)
-  | Fld : tagged_expr * fld -> value se  (** field of a record / deconstruct *)
-  | Diff : tagged_expr * pattern se -> value se  (** screening *)
-
-let pat_to_val : pattern se -> value se = function
-  | Top -> Top
-  | Const c -> Const c
-  | Ctor_pat (k, l) -> Ctor_pat (k, l)
-
-let val_to_pat : value se -> pattern se option = function
-  | (Top | Const _ | Ctor_pat _) as p -> Some p
-  | _ -> None
+  | Prim_p of CL.Primitive.description * arg
+  | Ctor of ctor * loc list  (** One ADT to rule them all :D *)
+  | Arr of loc  (** Dynamically allocated arrays *)
+  | Fld of tagged_expr * fld  (** field of a record / deconstruct *)
 
 (** For labelling expressions and memory locations *)
 module LocSet = Set.Make (struct
@@ -171,7 +158,7 @@ let packet_of_expr e = Packet (loc_of_expr e)
 (** For updating set constraints *)
 
 module SESet = Set.Make (struct
-  type t = value se
+  type t = se
 
   let compare = compare
 end)
@@ -189,8 +176,8 @@ end
 
 let worklist : Worklist.t = ref SESet.empty
 let prev_worklist : Worklist.t = ref SESet.empty
-let sc : (value se, SESet.t) t = create 10
-let reverse_sc : (value se, SESet.t) t = create 10
+let sc : (se, SESet.t) t = create 10
+let reverse_sc : (se, SESet.t) t = create 10
 let changed = ref false
 let lookup_sc se = try find sc se with Not_found -> SESet.empty
 
@@ -213,9 +200,6 @@ let lookup_id (x, ctx) =
 
 exception Escape
 
-let to_be_filtered : Worklist.t = ref SESet.empty
-let reverse_mem : (loc, SESet.t) t = create 10
-
 let update_worklist key set =
   let summarize elt =
     let idx =
@@ -225,22 +209,9 @@ let update_worklist key set =
       | Fld (e, _) ->
         Worklist.add (Var e) worklist;
         Var e
-      | Diff (e, _) ->
-        Worklist.add (Var e) worklist;
-        Worklist.add (Var e) to_be_filtered;
-        Var e
       | Var _ | Loc _ | Id _ ->
         Worklist.add elt worklist;
         elt
-      | Ctor (_, l) ->
-        if Worklist.mem key to_be_filtered then
-          List.iter
-            (fun (l, _) ->
-              match find reverse_mem l with
-              | exception Not_found -> add reverse_mem l (SESet.singleton key)
-              | original -> replace reverse_mem l (SESet.add key original))
-            l;
-        raise Escape
       | _ -> raise Escape
     in
     match find reverse_sc idx with
@@ -249,29 +220,14 @@ let update_worklist key set =
   in
   match key with
   | Fld (e, _) -> summarize (Var e)
-  | Loc l ->
-    let reverse_set = try find reverse_mem l with Not_found -> SESet.empty in
-    SESet.iter (fun x -> Worklist.add x worklist) reverse_set;
-    Worklist.add key worklist;
-    SESet.iter (fun se -> try summarize se with Escape -> ()) set
-  | Var _ ->
+  | Loc _ | Var _ ->
     Worklist.add key worklist;
     SESet.iter (fun se -> try summarize se with Escape -> ()) set
   | _ -> failwith "Invalid LHS"
 
 let update_sc lhs added =
-  let true_if_val x =
-    match val_to_pat x with Some _ -> true | None -> false
-  in
   let original = lookup_sc lhs in
-  let added_val, added_pat = SESet.partition true_if_val added in
-  let diff_val = SESet.diff added_val original in
-  let diff_pat =
-    if SESet.mem Top original then SESet.empty
-    else if SESet.mem Top added_pat then SESet.singleton Top
-    else SESet.diff added_pat original
-  in
-  let diff = SESet.union diff_val diff_pat in
+  let diff = SESet.diff added original in
   if not (SESet.is_empty diff) then (
     changed := true;
     update_worklist lhs diff;
@@ -346,7 +302,7 @@ let rec val_of_path = function
 
 let exn_of_file = create 10
 
-let update_exn_of_file (key : string) (data : value se list) =
+let update_exn_of_file (key : string) (data : se list) =
   add exn_of_file key data
 
 (* let inline_table : (id, SESet.t) Hashtbl.t = create 10 *)

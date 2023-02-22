@@ -24,10 +24,10 @@ let value_prim = function
       let i = new_memory (get_context (Var x)) in
       Hashtbl.add allocated x i;
       update_sc (Loc i) value;
-      SESet.singleton (Ctor (None, [(i, None)]))
+      SESet.singleton (Ctor (None, [i]))
     | i ->
       update_sc (Loc i) value;
-      SESet.singleton (Ctor (None, [(i, None)])))
+      SESet.singleton (Ctor (None, [i])))
   | {prim_name = "%lazy_force"}, [Some x] -> SESet.singleton (App_v (x, []))
   | ( {
         prim_name =

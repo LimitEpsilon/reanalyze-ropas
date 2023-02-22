@@ -26,26 +26,23 @@ and fld = ctor * int option
 and pattern
 and value
 
-and _ se =
-  | Top : _ se
-  | Const : CL.Asttypes.constant -> _ se
-  | Ctor_pat : ctor * pattern se list -> _ se
-  | Var : tagged_expr -> value se
-  | Loc : loc -> value se
-  | Id : id -> value se
-  | Prim : CL.Primitive.description -> value se
-  | Fn : param * loc list -> value se
-  | App_v : tagged_expr * arg -> value se
-  | Prim_v : CL.Primitive.description * arg -> value se
-  | App_p : tagged_expr * arg -> value se
-  | Prim_p : CL.Primitive.description * arg -> value se
-  | Ctor : ctor * (loc * pattern se option) list -> value se
-  | Arr : loc -> value se
-  | Fld : tagged_expr * fld -> value se
-  | Diff : tagged_expr * pattern se -> value se
-
-val pat_to_val : pattern se -> value se
-val val_to_pat : value se -> pattern se option
+and se =
+  | Top  (** _ *)
+  | Const of CL.Asttypes.constant
+  | Var of tagged_expr  (** set variable *)
+  | Loc of loc  (** !ℓ *)
+  | Id of id  (** identifiers *)
+  | Prim of CL.Primitive.description
+      (** primitives, later converted to top/fld/arr/ctor *)
+  | Fn of param * loc list  (** lambda expression *)
+  | App_v of tagged_expr * arg  (** possible values / force when arg = nil *)
+  | Prim_v of CL.Primitive.description * arg
+  | App_p of tagged_expr * arg
+      (** possible exn packets / force when arg = nil *)
+  | Prim_p of CL.Primitive.description * arg
+  | Ctor of ctor * loc list  (** One ADT to rule them all :D *)
+  | Arr of loc  (** Dynamically allocated arrays *)
+  | Fld of tagged_expr * fld  (** field of a record / deconstruct *)
 
 module LocSet : Set.S with type elt = loc
 
@@ -62,7 +59,7 @@ val val_of_expr : CL.Typedtree.expression -> tagged_expr
 val packet_of_expr : CL.Typedtree.expression -> tagged_expr
 val val_of_path : CL.Path.t -> tagged_expr
 
-module SESet : Set.S with type elt = value se
+module SESet : Set.S with type elt = se
 
 module Worklist : sig
   type t = SESet.t ref
@@ -74,13 +71,13 @@ end
 
 val worklist : Worklist.t
 val prev_worklist : Worklist.t
-val sc : (value se, SESet.t) Hashtbl.t
-val reverse_sc : (value se, SESet.t) Hashtbl.t
-val lookup_sc : value se -> SESet.t
-val update_worklist : value se -> SESet.t -> unit
-val update_sc : value se -> SESet.t -> unit
-val get_context : value se -> string
-val init_sc : value se -> value se list -> unit
+val sc : (se, SESet.t) Hashtbl.t
+val reverse_sc : (se, SESet.t) Hashtbl.t
+val lookup_sc : se -> SESet.t
+val update_worklist : se -> SESet.t -> unit
+val update_sc : se -> SESet.t -> unit
+val get_context : se -> string
+val init_sc : se -> se list -> unit
 
 type var_se_tbl = (string, (CL.Ident.t, tagged_expr) Hashtbl.t) Hashtbl.t
 
@@ -93,5 +90,5 @@ val list_to_array : 'a list -> 'a array
 
 (* for resolution *)
 val changed : bool ref
-val exn_of_file : (string, value se list) Hashtbl.t
-val update_exn_of_file : string -> value se list -> unit
+val exn_of_file : (string, se list) Hashtbl.t
+val update_exn_of_file : string -> se list -> unit

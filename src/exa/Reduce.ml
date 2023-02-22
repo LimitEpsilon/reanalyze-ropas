@@ -91,21 +91,7 @@ let elaborate_fld se fld =
     | kappa', Some i -> (
       try
         if kappa = kappa' then
-          let ith =
-            match List.nth l i with
-            | l, None -> Loc l
-            | _, Some p -> pat_to_val p
-          in
-          SESet.singleton ith
-        else SESet.empty
-      with _ -> SESet.empty)
-    | _ -> SESet.empty)
-  | Ctor_pat (kappa, l) -> (
-    match fld with
-    | kappa', Some i -> (
-      try
-        if kappa = kappa' then
-          let ith = pat_to_val (List.nth l i) in
+          let ith = Loc (List.nth l i) in
           SESet.singleton ith
         else SESet.empty
       with _ -> SESet.empty)
@@ -114,86 +100,16 @@ let elaborate_fld se fld =
   | _ -> SESet.empty
 
 let propagate = function
-  | Top | Const _ | Ctor_pat _ | Ctor _ | Arr _ | Prim _ | Fn _
+  | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | Prim_v _ ->
     true
   | _ -> false
 
-let rec filter_pat = function
-  | _, Top -> SESet.empty
-  | Const c, Const c' ->
-    if c = c' then SESet.empty else SESet.singleton (Const c)
-  | Ctor_pat (kappa, l), Ctor_pat (kappa', l') ->
-    if kappa <> kappa' || List.length l <> List.length l' then
-      SESet.singleton (Ctor_pat (kappa, l))
-    else
-      let filtered_lists =
-        List.map (fun l -> Ctor_pat (kappa, l)) (diff_pat_list ([], l) l')
-      in
-      SESet.of_list filtered_lists
-  | Ctor (kappa, l), Ctor_pat (kappa', l') ->
-    if kappa <> kappa' || List.length l <> List.length l' then
-      SESet.singleton (Ctor (kappa, l))
-    else
-      let filtered_lists =
-        List.map (fun l -> Ctor (kappa, l)) (diff_list ([], l) l')
-      in
-      SESet.of_list filtered_lists
-  | x, _ -> SESet.singleton x
-
-and diff_pat_list (rev_hd, tl) tl' =
-  match (tl, tl') with
-  | [], [] -> []
-  | hd :: tl1, hd' :: tl2 ->
-    let diff = filter_pat (pat_to_val hd, hd') in
-    let inter = hd' in
-    let diff_rest = diff_pat_list (inter :: rev_hd, tl1) tl2 in
-    SESet.fold
-      (fun x acc ->
-        match val_to_pat x with
-        | Some p -> List.rev_append rev_hd (p :: tl1) :: acc
-        | None -> acc)
-      diff diff_rest
-  | _ -> assert false
-
-and diff_list (rev_hd, tl) tl' =
-  match (tl, tl') with
-  | [], [] -> []
-  | (l, None) :: tl1, p :: tl2 ->
-    let abstraction = function
-      | Ctor (kappa, l) ->
-        Ctor_pat (kappa, List.map (function _, None -> Top | _, Some p -> p) l)
-      | x -> ( match val_to_pat x with None -> Top | Some p -> p)
-    in
-    let diff =
-      SESet.fold
-        (fun se acc -> SESet.union (filter_pat (se, p)) acc)
-        (SESet.filter propagate (lookup_sc (Loc l)))
-        SESet.empty
-    in
-    let inter = (l, Some p) in
-    let diff_rest = diff_list (inter :: rev_hd, tl1) tl2 in
-    SESet.fold
-      (fun x acc ->
-        List.rev_append rev_hd ((l, Some (abstraction x)) :: tl1) :: acc)
-      diff diff_rest
-  | (l, Some p1) :: tl1, p2 :: tl2 ->
-    let diff = filter_pat (pat_to_val p1, p2) in
-    let inter = (l, Some p2) in
-    let diff_rest = diff_list (inter :: rev_hd, tl1) tl2 in
-    SESet.fold
-      (fun x acc ->
-        List.rev_append rev_hd
-          ((l, val_to_pat x (* must always be Some p *)) :: tl1)
-        :: acc)
-      diff diff_rest
-  | _ -> assert false
-
 (** given a collection of set expressions under env, elaborate upon possible expressions *)
 let elaborate se =
   match se with
-  | Top | Const _ | Ctor_pat _ | Ctor _ | Arr _ | Prim _ | Fn _
+  | Top | Const _ | Ctor _ | Arr _ | Prim _ | Fn _
   | App_v (_, None :: _)
   | App_p (_, None :: _)
   | Prim_v _ | Prim_p _ ->
@@ -243,15 +159,6 @@ let elaborate se =
         stop_timer time_spent_in_fld;
         SESet.union to_add acc)
       (lookup_sc (Var e)) SESet.empty
-  | Diff (e, p) when Worklist.mem (Var e) prev_worklist ->
-    SESet.fold
-      (fun se acc ->
-        start_timer ();
-        let filtered = filter_pat (se, p) in
-        stop_timer time_spent_in_filter;
-        SESet.union filtered acc)
-      (SESet.filter propagate (lookup_sc (Var e)))
-      SESet.empty
   | Var e when Worklist.mem (Var e) prev_worklist ->
     start_timer ();
     let set = SESet.filter propagate (lookup_sc (Var e)) in
@@ -297,22 +204,8 @@ let step_sc_for_entry x set =
     start_timer ();
     SESet.iter
       (function
-        | Ctor (k, l) -> (
-          try
-            match List.nth l i with
-            | loc, Some _ ->
-              let j = ref (-1) in
-              let temp_l =
-                List.fold_left
-                  (fun acc x ->
-                    incr j;
-                    if !j = i then (loc, None) :: acc else x :: acc)
-                  [] l
-              in
-              let temp = Ctor (k, List.rev temp_l) in
-              back_propagate e (SESet.singleton temp)
-            | loc, None -> update_sc (Loc loc) set
-          with _ -> ())
+        | Ctor (None, l) -> (
+          try update_sc (Loc (List.nth l i)) set with _ -> ())
         | _ -> ())
       (lookup_sc (Var e));
     stop_timer time_spent_in_update

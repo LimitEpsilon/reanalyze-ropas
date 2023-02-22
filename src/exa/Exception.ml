@@ -61,6 +61,6 @@ let print_time () =
 
 let reportResults ~ppf:_ =
   solve ();
-  PrintSE.print_exa ();
+  PrintSE.print_closure ();
   if !Common.Cli.debug_time then print_time ();
   if !Common.Cli.debug then PrintSE.print_sc_info ()

@@ -35,15 +35,9 @@ let print_tagged_expr : tagged_expr -> unit = function
     print_loc p;
     prerr_string ")"
 
-let rec print_se : value se -> unit = function
+let rec print_se : se -> unit = function
   | Top -> prerr_string "⊤"
   | Const c -> prerr_string (CL.Printpat.pretty_const c)
-  | Ctor_pat (k, arr) ->
-    prerr_string "Ctor (";
-    (match k with None -> prerr_string "-" | Some s -> prerr_string s);
-    prerr_string ", ";
-    print_pattern_list_with_separator arr ";";
-    prerr_string ")"
   | Fn (p, list) ->
     prerr_string "λ";
     print_param p;
@@ -104,17 +98,9 @@ let rec print_se : value se -> unit = function
     | _, None -> prerr_string " , ");
     prerr_string "))"
   | Loc (i, _) -> prerr_string ("!ℓ_" ^ string_of_int i)
-  | Diff (x, y) ->
-    prerr_string "(";
-    print_tagged_expr x;
-    prerr_string ")-(";
-    print_pattern y;
-    prerr_string ")"
   | Id (x, _) -> prerr_string (CL.Ident.unique_name x)
 
-and print_pattern p = print_se (pat_to_val p)
-
-and print_ses (xs : value se list) =
+and print_ses (xs : se list) =
   prerr_string "[";
   List.iter print_se xs;
   prerr_string "]"
@@ -128,19 +114,6 @@ and print_se_list_with_separator l sep =
       prerr_string "(";
       print_se hd;
       prerr_string ")";
-      if tl <> [] then prerr_string sep;
-      l' := tl
-    | _ -> assert false
-  done;
-  prerr_string "]"
-
-and print_pattern_list_with_separator l sep =
-  let l' = ref l in
-  prerr_string "[";
-  while !l' <> [] do
-    match !l' with
-    | hd :: tl ->
-      print_pattern hd;
       if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
@@ -187,7 +160,7 @@ and print_list_with_separator l sep =
     match !l' with
     | hd :: tl ->
       prerr_string "ℓ_";
-      prerr_int (fst (fst hd));
+      prerr_int (fst hd);
       if tl <> [] then prerr_string sep;
       l' := tl
     | _ -> assert false
@@ -215,7 +188,7 @@ let show_var_se_tbl (var_to_se : var_se_tbl) =
         tbl)
     var_to_se
 
-let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
+let show_sc_tbl (tbl : (se, SESet.t) Hashtbl.t) =
   Hashtbl.iter
     (fun key data ->
       if SESet.is_empty data then ()
@@ -230,139 +203,15 @@ let show_sc_tbl (tbl : (value se, SESet.t) Hashtbl.t) =
         prerr_newline ()))
     tbl
 
-let tracked_vars = Hashtbl.create 10
-let track_path = ref false
-
-let filter_exns = function
-  | Top | Const _ | Ctor_pat _ | Ctor _ -> true
+let filter_closure = function
+  | Fn (_, _) | App_v (_, None :: _) | Prim_v _ | Prim _ -> true
   | _ -> false
-
-let rec track_exception (x : value se) (exn : value se) =
-  let propagate = function
-    | Var x -> (
-      let exns =
-        try SESet.filter filter_exns (lookup_sc (Var x)) with _ -> SESet.empty
-      in
-      let filter p =
-        match exn with
-        | Ctor_pat (k, _) | Ctor (k, _) -> (
-          match p with Ctor_pat (k', _) | Ctor (k', _) -> k = k' | _ -> false)
-        | Top -> p = Top
-        | _ -> false
-      in
-      let filtered = SESet.filter filter exns in
-      if not (SESet.is_empty filtered) then
-        let () =
-          if !track_path then (
-            print_tagged_expr x;
-            prerr_newline ())
-        in
-        match x with
-        | Val e ->
-          prerr_string "  raised from: ";
-          print_loc e;
-          prerr_newline ()
-        | _ ->
-          SESet.iter
-            (function
-              | Var x -> track_exception (Var x) exn
-              | Diff (x, _) -> track_exception (Var x) exn
-              | _ -> ())
-            (lookup_sc (Var x)))
-    | _ -> assert false
-  in
-  match Hashtbl.find tracked_vars x with
-  | exception Not_found ->
-    Hashtbl.add tracked_vars x ();
-    propagate x
-  | () -> ()
-
-let explain_abs_mem () =
-  if not (LocSet.is_empty !to_be_explained) then
-    prerr_endline " Where abstract locations contain:";
-  LocSet.iter
-    (fun (i, name) ->
-      let set =
-        try SESet.filter filter_exns (lookup_sc (Loc (i, name)))
-        with _ -> SESet.empty
-      in
-      prerr_string " ℓ_";
-      prerr_int i;
-      prerr_string ":\n";
-      show_se_with_separator set "  ")
-    !to_be_explained;
-  to_be_explained := LocSet.empty
-
-let show_exn_of_file (tbl : (string, value se list) Hashtbl.t) =
-  Hashtbl.iter
-    (fun key data ->
-      prerr_string "Exceptions in file ";
-      prerr_string key;
-      prerr_newline ();
-      if data = [] then prerr_string " No escaping exceptions\n\n"
-      else
-        let printed = ref false in
-        let () =
-          List.iter
-            (function
-              | Var (Packet loc) ->
-                let set =
-                  try SESet.filter filter_exns (lookup_sc (Var (Packet loc)))
-                  with _ -> SESet.empty
-                in
-                if SESet.is_empty set then ()
-                else (
-                  printed := true;
-                  prerr_string " Escaped from ";
-                  print_loc loc;
-                  prerr_endline ":";
-                  SESet.iter
-                    (function
-                      | Ctor (Some ctor, l) as exn ->
-                        track_path := ctor = !Common.Cli.ctor_to_track;
-                        prerr_string (" " ^ ctor ^ " with arguments ");
-                        print_list_with_separator l ";";
-                        prerr_string ":\n";
-                        List.iter
-                          (fun (l, _) ->
-                            to_be_explained := LocSet.add l !to_be_explained)
-                          l;
-                        Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet loc)) exn
-                      | Ctor_pat (Some ctor, l) as exn ->
-                        track_path := ctor = !Common.Cli.ctor_to_track;
-                        prerr_string (" " ^ ctor ^ " with arguments ");
-                        print_pattern_list_with_separator l ";";
-                        prerr_string ":\n";
-                        Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet loc)) exn
-                      | exn ->
-                        prerr_string " ";
-                        print_se exn;
-                        prerr_string ":\n";
-                        Hashtbl.clear tracked_vars;
-                        track_exception (Var (Packet loc)) exn)
-                    set;
-                  prerr_newline ())
-              | _ -> ())
-            data
-        in
-        if !printed then () else prerr_string " No escaping exceptions\n\n")
-    tbl;
-  explain_abs_mem ()
 
 let show_closure_analysis tbl =
   prerr_endline "Closure analysis:";
   Hashtbl.iter
     (fun key data ->
-      let set =
-        SESet.filter
-          (fun x ->
-            match x with
-            | App_v (_, _) | Fn (_, _) | Prim _ -> true
-            | _ -> false)
-          data
-      in
+      let set = SESet.filter filter_closure data in
       if SESet.is_empty set then ()
       else (
         print_se key;
@@ -374,10 +223,6 @@ let show_closure_analysis tbl =
 let print_sc_info () =
   show_var_se_tbl global_env;
   show_sc_tbl sc
-
-let print_exa () =
-  Format.flush_str_formatter () |> ignore;
-  show_exn_of_file exn_of_file
 
 let print_closure () =
   Format.flush_str_formatter () |> ignore;
