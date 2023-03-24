@@ -1,3 +1,12 @@
+(*
+ * Copyright (c) Programming Research Laboratory (ROPAS)
+ *               Seoul National University, Korea
+ * Copyright (c) ReScript Association
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ *)
+
 type expr_summary = {
   exp_type : CL.Types.type_expr;
   exp_loc : CL.Location.t;
