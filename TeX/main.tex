@@ -325,18 +325,18 @@ Now, let's define $\mathcal{F}$:
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,-,i)$,
     \begin{enumerate}
         \item If $\hat{\mathcal{X}_1}\supseteq\top$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$.
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\bigstar$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\bigstar$ to $G$.
         \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
     \end{enumerate}    
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathsf{fld}(\mathcal{X}_1,\kappa,i)$,
     \begin{enumerate}
         \item If $\hat{\mathcal{X}_1}\supseteq\top$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\top$ to $G$.
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\text{something}$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\text{something}$ to $G$. The constructor $\kappa$ must be matched.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...\hat{\ell_i}...\rangle$ is in $G$ and if $!\hat{\ell_i}\supseteq\bigstar$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\bigstar$ to $G$.
         \item If $\hat{\mathcal{X}_1}\supseteq\langle\kappa,...p_i...\rangle$ is in $G$, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq p_i$ to $G$.
     \end{enumerate}
-    \item For production $\mathsf{fld}(\mathcal{X}, -, i)\supseteq\mathsf{something}$,
+    \item For production $\mathsf{fld}(\mathcal{X}, -, i)\supseteq\bigstar$,
     \begin{enumerate}
-        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat\ell_i...\rangle$ is in $G$, add $!\ell_i\supseteq\text{something}$ to $C$.
+        \item If $\hat{\mathcal{X}_1}\supseteq\langle(-\vbar\kappa),...\hat\ell_i...\rangle$ is in $G$, add $!\ell_i\supseteq\bigstar$ to $C$.
     \end{enumerate}
     \item For production $\mathcal{X}\vbar!\ell\supseteq\mathcal{X}_1-p$, first define
     \[
@@ -353,22 +353,22 @@ Now, let's define $\mathcal{F}$:
     
     Note that $\top$ happens on a $\pi_v$, and the type of $p$ must match with the type of $x$, so we can reconstruct the type of $\top$ from $p$ (when we use externals that return records). Also, in the list concatenation part of the last case, if the result of $\mathsf{filter}$ is $\varnothing$, the whole thing is $\varnothing$.
     
-    Now, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\alpha$ for all $\alpha\in\mathsf{filter}(\hat{\mathcal{X}}_1,p)$ to $G$.
+    Now, add $\hat{\mathcal{X}}\vbar!\hat{\ell}\supseteq\bigstar$ for all $\bigstar\in\mathsf{filter}(\hat{\mathcal{X}}_1,p)$ to $G$.
 \end{enumerate}
 
-\subsection{\texttt{Array.make} (resolution of $\pi$: maybe later)}
-For primitives $\pi$, a new constructor is generated, e.g., $\mathsf{app}_v(\pi, [])$ to $\mathsf{ctor}(-, [\ell_{\text{new}}])$.
-
-\subsection{Brainstorming}
-\begin{align*}
-    \langle\kappa, \ell_1 \ell_2 ... \ell_n\rangle - \langle\kappa, p_1 p_2 ... p_n\rangle &= \langle \kappa, (\ell_1 - p_1)\ell_2 ... \ell_n\rangle\\
-    &\quad+ \langle\kappa, p_1 (\ell_2 ... \ell_n - p_2 ... p_n)\rangle\\
-    &= ...\\
-    &= \sum_{i = 0}^{n - 1}\left(\prod_{j = 1}^{i}{p_j}\right)(\ell_{i + 1} - p_{i + 1})\left(\prod_{j = i + 2}^{n}\ell_j\right)\\
-    \ell - p &= !{\hat \ell} - p
-\end{align*}
-
-Here, the product notation stands for list concatenation, when $p_i$ and $\ell_i$ stands for a single-element list. $\ell-p$ stands for the contents of the abstract location $\ell$ that is not matched by the pattern $p$ : how to express this neatly?
+%\subsection{\texttt{Array.make} (resolution of $\pi$: maybe later)}
+%For primitives $\pi$, a new constructor is generated, e.g., $\mathsf{app}_v(\pi, [])$ to $\mathsf{ctor}(-, [\ell_{\text{new}}])$.
+%
+%\subsection{Brainstorming}
+%\begin{align*}
+%    \langle\kappa, \ell_1 \ell_2 ... \ell_n\rangle - \langle\kappa, p_1 p_2 ... p_n\rangle &= \langle \kappa, (\ell_1 - p_1)\ell_2 ... \ell_n\rangle\\
+%    &\quad+ \langle\kappa, p_1 (\ell_2 ... \ell_n - p_2 ... p_n)\rangle\\
+%    &= ...\\
+%    &= \sum_{i = 0}^{n - 1}\left(\prod_{j = 1}^{i}{p_j}\right)(\ell_{i + 1} - p_{i + 1})\left(\prod_{j = i + 2}^{n}\ell_j\right)\\
+%    \ell - p &= !{\hat \ell} - p
+%\end{align*}
+%
+%Here, the product notation stands for list concatenation, when $p_i$ and $\ell_i$ stands for a single-element list. $\ell-p$ stands for the contents of the abstract location $\ell$ that is not matched by the pattern $p$ : how to express this neatly?
 \end{document}
 %%% Local Variables: 
 %%% coding: utf-8
